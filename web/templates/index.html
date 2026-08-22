@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deep Rock — Multifamily Tract Scorer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+    --tx:#e6e9ef; --tx2:#9aa3b2; --accent:#4ea1ff; --good:#3ddc97; --warn:#ffb020; --bad:#ff5c5c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       background:var(--bg);color:var(--tx)}
+  header{padding:12px 18px;background:var(--panel);border-bottom:1px solid var(--line);
+         display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.2px}
+  h1 span{color:var(--tx2);font-weight:400}
+  .layers{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+  .chip{font-size:11px;padding:3px 9px;border-radius:99px;border:1px solid var(--line);
+        background:var(--panel2);color:var(--tx2)}
+  .chip.on{color:var(--good);border-color:#20503c;background:#12241c}
+  .chip.off{color:var(--tx2);opacity:.65}
+  .wrap{display:grid;grid-template-columns:400px 1fr;height:calc(100vh - 53px)}
+  @media (max-width:900px){.wrap{grid-template-columns:1fr;height:auto}#map{height:60vh}}
+  aside{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;padding:16px}
+  #map{width:100%;height:100%;background:#0b0d11}
+  .search{display:flex;gap:8px;margin-bottom:14px}
+  input[type=text]{flex:1;padding:10px 12px;border-radius:8px;border:1px solid var(--line);
+        background:var(--panel2);color:var(--tx);font-size:13px}
+  input[type=text]:focus{outline:none;border-color:var(--accent)}
+  button{padding:10px 16px;border-radius:8px;border:0;background:var(--accent);color:#06121f;
+        font-weight:600;cursor:pointer;font-size:13px}
+  button:disabled{opacity:.5;cursor:default}
+  .banner{padding:10px 12px;border-radius:8px;background:#2a1f0a;border:1px solid #4d3a11;
+        color:var(--warn);font-size:12px;margin-bottom:14px;line-height:1.45}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+        padding:14px;margin-bottom:12px}
+  .card h3{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;
+        color:var(--tx2);font-weight:600}
+  .kv{display:flex;justify-content:space-between;gap:12px;padding:4px 0;
+        border-bottom:1px solid rgba(255,255,255,.04);font-size:13px}
+  .kv:last-child{border-bottom:0}
+  .kv .k{color:var(--tx2)}
+  .kv .v{font-variant-numeric:tabular-nums;text-align:right}
+  .big{font-size:32px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+  .muted{color:var(--tx2)}
+  .pos{color:var(--good)} .neg{color:var(--bad)} .mid{color:var(--warn)}
+  .pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;
+        background:#12241c;color:var(--good);border:1px solid #20503c;margin-left:6px}
+  .legend{position:absolute;bottom:22px;right:12px;z-index:600;background:rgba(23,26,33,.94);
+        border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:11px}
+  .legend .row{display:flex;align-items:center;gap:7px;margin:3px 0}
+  .sw{width:15px;height:11px;border-radius:2px;display:inline-block}
+  .hint{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:600;
+        background:rgba(23,26,33,.94);border:1px solid var(--line);border-radius:8px;
+        padding:7px 14px;font-size:12px;color:var(--tx2)}
+  .maprel{position:relative;height:100%}
+  .err{color:var(--bad);font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  td{padding:3px 0;border-bottom:1px solid rgba(255,255,255,.04)}
+  td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<header>
+  <h1>Deep Rock <span>· Multifamily Tract Scorer</span></h1>
+  <div class="layers">
+    {% for name, ok in status.items() %}
+      <span class="chip {{ 'on' if ok else 'off' }}">{{ '●' if ok else '○' }} {{ name.replace('_',' ') }}</span>
+    {% endfor %}
+  </div>
+</header>
+
+<div class="wrap">
+  <aside>
+    <div class="search">
+      <input id="addr" type="text" placeholder="123 Main St, Austin, TX" autocomplete="off">
+      <button id="go">Look up</button>
+    </div>
+
+    {% if not status.scores %}
+    <div class="banner">
+      <b>Scores not computed yet.</b> Geometry and spatial layers load independently of
+      demographics. Tract scores appear here once the ACS ingest and scorer have run.
+      Address lookup and the map work now.
+    </div>
+    {% endif %}
+
+    <div id="out"><div class="card muted">Enter an address, or click any tract on the map.</div></div>
+  </aside>
+
+  <div class="maprel">
+    <div id="map"></div>
+    <div class="hint" id="hint">Zoom in past county level to see individual tracts</div>
+    <div class="legend">
+      <div style="color:var(--tx2);margin-bottom:5px">Investment score</div>
+      <div class="row"><span class="sw" style="background:#fcffa4"></span> 80–100 hot</div>
+      <div class="row"><span class="sw" style="background:#fca50a"></span> 60–80</div>
+      <div class="row"><span class="sw" style="background:#dd513a"></span> 40–60</div>
+      <div class="row"><span class="sw" style="background:#932667"></span> 20–40</div>
+      <div class="row"><span class="sw" style="background:#420a68"></span> 0–20 cold</div>
+      <div class="row"><span class="sw" style="background:#3a3f4b"></span> no data</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map', {preferCanvas:true}).setView([39.5,-98.35], 4);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  {maxZoom:18, attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+
+// Magma ramp: perceptually uniform and colorblind-safe, and still reads as heat.
+function color(v){
+  if(v===null||v===undefined) return '#3a3f4b';
+  return v>=80?'#fcffa4':v>=60?'#fca50a':v>=40?'#dd513a':v>=20?'#932667':'#420a68';
+}
+function style(f){
+  const s=f.properties.score;
+  return {fillColor:color(s), weight:.4, color:'#11141a',
+          fillOpacity:s===null||s===undefined?0.18:0.72};
+}
+
+let countyLayer=null, tractLayer=null, marker=null;
+
+fetch('/api/counties.geojson').then(r=>r.json()).then(g=>{
+  if(!g.features.length) return;
+  countyLayer=L.geoJSON(g,{style, onEachFeature:(f,l)=>{
+    const p=f.properties;
+    l.bindTooltip(`<b>${p.name||p.county_fips}</b><br>score ${p.score??'—'} · ${p.scored_tracts??0}/${p.tract_count??0} tracts scored`);
+  }}).addTo(map);
+});
+
+function loadTracts(){
+  const z=map.getZoom();
+  const hint=document.getElementById('hint');
+  if(z<9){
+    if(tractLayer){map.removeLayer(tractLayer);tractLayer=null;}
+    if(countyLayer && !map.hasLayer(countyLayer)) countyLayer.addTo(map);
+    hint.style.display='block';
+    return;
+  }
+  hint.style.display='none';
+  if(countyLayer && map.hasLayer(countyLayer)) map.removeLayer(countyLayer);
+  const b=map.getBounds();
+  const bbox=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()].join(',');
+  fetch('/api/tracts.geojson?bbox='+bbox).then(r=>r.json()).then(g=>{
+    if(tractLayer) map.removeLayer(tractLayer);
+    tractLayer=L.geoJSON(g,{style, onEachFeature:(f,l)=>{
+      const p=f.properties;
+      l.bindTooltip(`<b>${p.name||p.geoid}</b><br>score ${p.score??'—'}${p.is_oz?' · OZ':''}`);
+      l.on('click',()=>showTract(p.geoid));
+    }}).addTo(map);
+  });
+}
+map.on('moveend', loadTracts);
+
+const fmt=(v,d=0)=>v===null||v===undefined?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:d});
+const money=v=>v===null||v===undefined?'—':'$'+Number(v).toLocaleString();
+const pct=(v,d=2)=>v===null||v===undefined?'—':Number(v).toFixed(d)+'%';
+const cls=v=>v===null||v===undefined?'':v>0?'pos':v<0?'neg':'';
+
+function render(d, matched){
+  const t=d.tract||d, g=t.geography, a=t.acs_latest, tr=t.trends, s=t.score;
+  let h='';
+
+  if(matched) h+=`<div class="card"><h3>Matched address</h3><div>${matched}</div>
+    <div class="muted" style="font-size:12px;margin-top:4px">Tract ${t.geoid}</div></div>`;
+
+  h+=`<div class="card"><h3>Investment score</h3>`;
+  if(s){
+    h+=`<div class="big">${fmt(s.score,1)}<span class="muted" style="font-size:15px">/100</span>
+        ${s.is_opportunity_zone?'<span class="pill">Opportunity Zone</span>':''}</div>
+        <div class="muted" style="font-size:12px;margin-top:6px">
+        cluster ${s.moran_cluster||'—'} · completeness ${fmt(s.data_completeness*100,0)}%</div>`;
+  } else {
+    h+=`<div class="muted">Not scored yet — scorer has not run for this tract.</div>`;
+  }
+  h+=`</div>`;
+
+  if(g) h+=`<div class="card"><h3>Geography</h3>
+    <div class="kv"><span class="k">Tract</span><span class="v">${g.name||t.geoid}</span></div>
+    <div class="kv"><span class="k">State / County FIPS</span><span class="v">${g.state_fips} / ${g.county_fips}</span></div>
+    <div class="kv"><span class="k">Land area</span><span class="v">${fmt(g.aland/2589988,2)} sq mi</span></div></div>`;
+
+  if(a){
+    h+=`<div class="card"><h3>Demographics · ACS ${a.vintage}</h3>
+      <div class="kv"><span class="k">Population</span><span class="v">${fmt(a.population)}</span></div>
+      <div class="kv"><span class="k">Median household income</span><span class="v">${money(a.median_hh_income)}</span></div>
+      <div class="kv"><span class="k">Median gross rent</span><span class="v">${money(a.median_gross_rent)}/mo</span></div>
+      <div class="kv"><span class="k">Median home value</span><span class="v">${money(a.median_home_value)}</span></div>
+      <div class="kv"><span class="k">Renter share</span><span class="v">${a.tenure_total?pct(100*a.tenure_renter/a.tenure_total,1):'—'}</span></div>
+      </div>`;
+  } else {
+    h+=`<div class="card"><h3>Demographics</h3><div class="muted">ACS not ingested yet
+      (needs a free Census API key).</div></div>`;
+  }
+
+  if(tr){
+    h+=`<div class="card"><h3>Trend · ${tr.span}</h3>
+      <div class="kv"><span class="k">Rent CAGR</span><span class="v ${cls(tr.rent_cagr_pct)}">${pct(tr.rent_cagr_pct)}</span></div>
+      <div class="kv"><span class="k">Income CAGR</span><span class="v ${cls(tr.income_cagr_pct)}">${pct(tr.income_cagr_pct)}</span></div>
+      <div class="kv"><span class="k"><b>Rent − income spread</b></span><span class="v ${cls(tr.rent_minus_income_spread)}"><b>${pct(tr.rent_minus_income_spread)}</b></span></div>
+      <div class="kv"><span class="k">Home value CAGR</span><span class="v ${cls(tr.home_value_cagr_pct)}">${pct(tr.home_value_cagr_pct)}</span></div>
+      <div class="kv"><span class="k">Rent-to-income</span><span class="v">${tr.rent_to_income?pct(tr.rent_to_income*100,1):'—'} <span class="muted">${tr.rent_burden_flag||''}</span></span></div>
+      <div class="kv"><span class="k">Degree share change</span><span class="v ${cls(tr.edu_share_change_pp)}">${tr.edu_share_change_pp===null?'—':(tr.edu_share_change_pp>0?'+':'')+tr.edu_share_change_pp+' pp'}</span></div>
+      </div>`;
+  }
+
+  if(t.pois && t.pois.length){
+    h+=`<div class="card"><h3>Amenities within 5 km</h3><table>`;
+    t.pois.forEach(p=>{h+=`<tr><td>${p.poi_class.replace('_',' ')}</td><td>${fmt(p.count_within_5k)}</td></tr>`;});
+    h+=`</table></div>`;
+  }
+
+  if(t.opportunity_zone){
+    h+=`<div class="card"><h3>Opportunity Zone</h3><div class="kv">
+      <span class="k">Status</span><span class="v">${t.opportunity_zone.in_oz?'✅ Designated':'Not designated'}</span></div></div>`;
+  }
+
+  document.getElementById('out').innerHTML=h;
+}
+
+function showTract(geoid){
+  fetch('/api/tract/'+geoid).then(r=>r.json()).then(d=>render(d,null));
+}
+
+function lookup(){
+  const a=document.getElementById('addr').value.trim();
+  if(!a) return;
+  const btn=document.getElementById('go');
+  btn.disabled=true; btn.textContent='…';
+  document.getElementById('out').innerHTML='<div class="card muted">Geocoding…</div>';
+  fetch('/api/lookup?address='+encodeURIComponent(a)).then(r=>r.json().then(j=>({ok:r.ok,j})))
+    .then(({ok,j})=>{
+      if(!ok){document.getElementById('out').innerHTML=`<div class="card err">${j.error||'lookup failed'}</div>`;return;}
+      render(j, j.matched_address);
+      if(marker) map.removeLayer(marker);
+      marker=L.circleMarker([j.lat,j.lon],{radius:7,color:'#4ea1ff',fillColor:'#4ea1ff',fillOpacity:.9}).addTo(map);
+      map.setView([j.lat,j.lon], 12);
+    })
+    .catch(e=>{document.getElementById('out').innerHTML=`<div class="card err">${e}</div>`;})
+    .finally(()=>{btn.disabled=false; btn.textContent='Look up';});
+}
+document.getElementById('go').onclick=lookup;
+document.getElementById('addr').addEventListener('keydown',e=>{if(e.key==='Enter')lookup();});
+</script>
+</body>
+</html>
