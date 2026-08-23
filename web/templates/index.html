@@ -140,6 +140,13 @@
   .kv:last-child{border-bottom:0}
   .kv .k{color:var(--tx3)}
   .kv .v{font-variant-numeric:tabular-nums;text-align:right;font-weight:600}
+  .kvdesc{border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:8px}
+  .kvdesc:last-child{border-bottom:0;padding-bottom:0;margin-bottom:0}
+  .kvdesc .kv{border-bottom:0;padding-bottom:2px}
+  .kvsub{font-size:11.5px;color:var(--tx3);line-height:1.45}
+  .scanrow{align-items:flex-start}
+  .scanheadline{font-size:12.5px;margin:3px 0 2px;line-height:1.45}
+  .scansep{color:var(--tx3);margin:0 5px}
   .hero{font-size:44px;font-weight:800;line-height:1;letter-spacing:-1px}
   .muted{color:var(--tx3)}
   .pos{color:var(--good)} .neg{color:var(--critical)} .mid{color:var(--warning)}
@@ -241,7 +248,7 @@
           <div class="muted" style="font-size:11px;margin-top:4px" id="s-budget-hint"></div>
         </div>
         <div class="fgroup">
-          <label>Mortgage rate (annual)</label>
+          <label>Mortgage interest rate</label>
           <div class="frow">
             <input type="number" id="s-rate" value="7.0" step="0.1" min="0">
             <span class="muted" style="font-size:12px">%</span>
@@ -255,21 +262,21 @@
           </div>
         </div>
         <div class="fgroup">
-          <label>Vacancy &amp; credit loss</label>
+          <label>Months empty / unpaid rent</label>
           <div class="frow">
             <input type="number" id="s-vacancy" value="7" min="0" max="100">
             <span class="muted" style="font-size:12px">%</span>
           </div>
         </div>
         <div class="fgroup">
-          <label>Operating expenses (% of effective income)</label>
+          <label>Running costs (share of rent collected)</label>
           <div class="frow">
             <input type="number" id="s-opex" value="40" min="0" max="100">
             <span class="muted" style="font-size:12px">%</span>
           </div>
         </div>
         <div class="fgroup">
-          <label>Assumed annual insurance (flat, applied everywhere — no per-area data source)</label>
+          <label>Assumed yearly insurance (same figure everywhere — no local data exists)</label>
           <input type="number" id="s-ins" value="1500" min="0">
         </div>
         <div class="fgroup">
@@ -344,7 +351,7 @@
           </div>
         </div>
         <div class="fgroup">
-          <label>Mortgage rate (annual)</label>
+          <label>Mortgage interest rate</label>
           <div class="frow">
             <input type="number" id="c-rate" value="7.0" step="0.1" min="0">
             <span class="muted" style="font-size:12px">%</span>
@@ -359,25 +366,25 @@
         </div>
 
         <div class="fgroup">
-          <label>Vacancy &amp; credit loss</label>
+          <label>Months empty / unpaid rent</label>
           <div class="frow">
             <input type="number" id="c-vacancy" value="7" min="0" max="100">
             <span class="muted" style="font-size:12px">%</span>
           </div>
         </div>
         <div class="fgroup">
-          <label>Operating expenses (% of effective income — repairs, management, etc.)</label>
+          <label>Running costs — repairs, management, upkeep (share of rent collected)</label>
           <div class="frow">
             <input type="number" id="c-opex" value="40" min="0" max="100">
             <span class="muted" style="font-size:12px">%</span>
           </div>
         </div>
         <div class="fgroup">
-          <label>Annual property tax</label>
+          <label>Yearly property tax</label>
           <input type="number" id="c-tax" placeholder="auto-fills from address lookup">
         </div>
         <div class="fgroup">
-          <label>Annual insurance</label>
+          <label>Yearly insurance</label>
           <input type="number" id="c-ins" placeholder="e.g. 2400 — no free data source for this, estimate or get a quote">
         </div>
 
@@ -657,20 +664,30 @@ document.getElementById('s-scan').onclick=()=>{
         box.innerHTML='<div class="card muted">No tracts matched — try a higher budget or loosen the state/distance filter.</div>';
         return;
       }
-      let h=`<div class="card"><h3>${j.count} matches under ${fmtUSD(j.max_price)}</h3>`;
+      let h=`<div class="card"><h3>${j.count} areas within a ${fmtUSD(j.max_price)} budget</h3>
+        <div class="whylede">Ranked by how much your down payment earns back each year. Click any row for the full picture.</div>`;
       j.tracts.forEach(t=>{
         const price=Number(t.price), rent=Number(t.rent_per_unit);
-        const rentToPrice=(rent*12/price*100);
-        const cfClass=Number(t.annual_cash_flow)>0?'pos':'neg';
+        const cf=Number(t.annual_cash_flow);
+        const cfClass=cf>0?'pos':'neg';
         const cl=CLUSTERS[t.moran_cluster];
         const sc=t.score!=null?Number(t.score):null;
-        h+=`<div class="resultitem" data-lat="${t.intptlat}" data-lon="${t.intptlon}" data-geoid="${t.geoid}" style="align-items:flex-start">
-          <span class="rdot" style="background:${cl?cl.color:'#3a3f4b'};margin-top:5px"></span>
+        const coc=t.cash_on_cash!=null?Number(t.cash_on_cash):null;
+        const dscr=t.dscr!=null?Number(t.dscr):null;
+        // Lead with the two numbers a buyer actually decides on -- what it
+        // pays back and whether it pays for itself -- instead of a row of
+        // industry abbreviations.
+        h+=`<div class="resultitem scanrow" data-lat="${t.intptlat}" data-lon="${t.intptlon}" data-geoid="${t.geoid}">
+          <span class="rdot" style="background:${cl?cl.color:'#3a3f4b'};margin-top:6px"></span>
           <div class="rmain">
             <div class="rname">${t.county_name||t.name||t.geoid}</div>
-            <div class="rmeta">${fmtUSD(price)} · ${fmtUSD(rent)}/mo · annual rent is ${rentToPrice.toFixed(1)}% of price</div>
-            <div class="rmeta">Cap ${fmtPct(Number(t.cap_rate))} · Cash flow <span class="${cfClass}">${fmtUSD(t.annual_cash_flow)}/yr</span> · CoC ${t.cash_on_cash!=null?fmtPct(Number(t.cash_on_cash)):'—'}${t.dscr!=null?' · DSCR '+Number(t.dscr).toFixed(2):''}</div>
-            <div class="rmeta">Neighborhood ${sc!=null?'<b style="color:var(--tx)">'+sc.toFixed(1)+'/100</b>':'<span class="mid">not scored</span>'}${cl?' · '+cl.label:''}</div>
+            <div class="scanheadline">
+              <span class="${cfClass}"><b>${coc==null?'—':coc.toFixed(1)+'%'}</b> a year on your cash</span>
+              <span class="scansep">·</span>
+              <span class="${cfClass}">${cf>=0?'+':''}${fmtUSD(cf)}/yr left over</span>
+            </div>
+            <div class="rmeta">Typical home ${fmtUSD(price)} · rents for about ${fmtUSD(rent)}/mo</div>
+            <div class="rmeta">${dscr==null?'Paid in cash':(dscr>=1.25?'Comfortably covers the mortgage':dscr>=1?'Just barely covers the mortgage':'Does <b>not</b> cover the mortgage')}${sc!=null?' · neighborhood scores <b style="color:var(--tx)">'+sc.toFixed(0)+'/100</b>':' · <span class="mid">neighborhood not scored</span>'}${cl?' · '+cl.label:''}</div>
           </div>
         </div>`;
       });
@@ -775,29 +792,49 @@ document.getElementById('c-compute').onclick=()=>{
 
   box.innerHTML=`
     <div class="card">
-      <h3>Yield</h3>
-      <div class="kv"><span class="k">Gross potential rent (annual)</span><span class="v">${fmtUSD(gpr)}</span></div>
-      <div class="kv"><span class="k">Effective gross income</span><span class="v">${fmtUSD(egi)}</span></div>
-      <div class="kv"><span class="k">Operating expenses</span><span class="v">${fmtUSD(opex)}</span></div>
+      <h3>Rental income</h3>
+      <div class="kvdesc">
+        <div class="kv"><span class="k">Rent in a perfect year</span><span class="v">${fmtUSD(gpr)}</span></div>
+        <div class="kvsub">Every unit, fully rented, all 12 months — before any vacancy or expenses.</div>
+      </div>
+      <div class="kvdesc">
+        <div class="kv"><span class="k">Rent actually collected</span><span class="v">${fmtUSD(egi)}</span></div>
+        <div class="kvsub">What you'd realistically collect after accounting for the vacancy rate you set.</div>
+      </div>
+      <div class="kv"><span class="k">Running costs</span><span class="v">${fmtUSD(opex)}</span></div>
       <div class="kv"><span class="k">Property tax${taxAssumed?' <span class="mid">(not entered)</span>':''}</span><span class="v">${fmtUSD(tax)}</span></div>
       <div class="kv"><span class="k">Insurance${insAssumed?' <span class="mid">(assumed)</span>':''}</span><span class="v">${fmtUSD(ins)}</span></div>
-      <div class="kv"><span class="k"><b>Net operating income</b></span><span class="v"><b>${fmtUSD(noi)}</b></span></div>
-      <div class="kv"><span class="k"><b>Cap rate</b></span><span class="v"><b>${fmtPct(capRate)}</b></span></div>
+      <div class="kvdesc">
+        <div class="kv"><span class="k"><b>Profit before the mortgage</b></span><span class="v"><b>${fmtUSD(noi)}</b></span></div>
+        <div class="kvsub">What's left after every running cost — before you pay the loan. Real estate calls this NOI.</div>
+      </div>
+      <div class="kvdesc">
+        <div class="kv"><span class="k"><b>Return if paid in cash</b></span><span class="v"><b>${fmtPct(capRate)}</b></span></div>
+        <div class="kvsub">The property's own yield, ignoring financing entirely — lets you compare deals side by side no matter how each is financed. Real estate calls this the cap rate.</div>
+      </div>
     </div>
     <div class="card">
       <h3>Financing</h3>
       <div class="kv"><span class="k">Down payment</span><span class="v">${fmtUSD(downDollar)}</span></div>
       <div class="kv"><span class="k">Loan amount</span><span class="v">${fmtUSD(loanAmount)}</span></div>
-      <div class="kv"><span class="k">Monthly principal &amp; interest</span><span class="v">${fmtUSD(monthlyPI)}</span></div>
-      <div class="kv"><span class="k">Annual debt service</span><span class="v">${fmtUSD(annualDebtService)}</span></div>
+      <div class="kvdesc">
+        <div class="kv"><span class="k">Monthly mortgage payment</span><span class="v">${fmtUSD(monthlyPI)}</span></div>
+        <div class="kvsub">Loan payment only — doesn't include taxes or insurance, which are already counted above.</div>
+      </div>
+      <div class="kv"><span class="k">Mortgage payments per year</span><span class="v">${fmtUSD(annualDebtService)}</span></div>
     </div>
     <div class="card">
-      <h3>Return</h3>
-      <div class="kv"><span class="k">Monthly cash flow</span><span class="v ${cfClass}">${fmtUSD(monthlyCashFlow)}</span></div>
-      <div class="kv"><span class="k"><b>Annual cash flow</b></span><span class="v ${cfClass}"><b>${fmtUSD(annualCashFlow)}</b></span></div>
-      <div class="kv"><span class="k"><b>Cash-on-cash return</b></span><span class="v ${cfClass}"><b>${cashOnCash==null?'—':fmtPct(cashOnCash)}</b></span></div>
-      <div class="kv"><span class="k">DSCR</span><span class="v ${dscrClass}">${dscr==null?'—':dscr.toFixed(2)}</span></div>
-      <div class="muted" style="font-size:11px;margin-top:10px">DSCR below 1.0 means the property's own income doesn't cover the mortgage — most lenders want at least 1.20-1.25.</div>
+      <h3>Your return</h3>
+      <div class="kv"><span class="k">Left over each month</span><span class="v ${cfClass}">${fmtUSD(monthlyCashFlow)}</span></div>
+      <div class="kv"><span class="k"><b>Left over each year</b></span><span class="v ${cfClass}"><b>${fmtUSD(annualCashFlow)}</b></span></div>
+      <div class="kvdesc">
+        <div class="kv"><span class="k"><b>Return on your cash</b></span><span class="v ${cfClass}"><b>${cashOnCash==null?'—':fmtPct(cashOnCash)}</b></span></div>
+        <div class="kvsub">Yearly profit as a share of the cash you actually put down — the number that matters most once you're financing the deal, not paying cash. Real estate calls this cash-on-cash return.</div>
+      </div>
+      <div class="kvdesc">
+        <div class="kv"><span class="k">Coverage cushion</span><span class="v ${dscrClass}">${dscr==null?'—':dscr.toFixed(2)}</span></div>
+        <div class="kvsub">How many times over the property's own income covers the mortgage payment. Below 1.00 means it doesn't cover the payment at all; most lenders want at least 1.20–1.25. Real estate calls this DSCR.</div>
+      </div>
     </div>
     ${(insAssumed||taxAssumed)?`<div class="banner">
       <b>Some costs weren't entered.</b> ${insAssumed?`Insurance assumed at ${fmtUSD(DEFAULT_INSURANCE)}/yr — real premiums vary enormously by location and can be several times that on the coast. `:''}${taxAssumed?'Property tax counted as $0, which no property has. ':''}Fill these in for a number you can act on.
@@ -1098,13 +1135,33 @@ function render(d, matched){
   }
 
   if(tr){
-    h+=`<div class="card"><h3>Trend · ${tr.span}</h3>
-      <div class="kv"><span class="k">Rent CAGR</span><span class="v ${cls(tr.rent_cagr_pct)}">${pct(tr.rent_cagr_pct)}</span></div>
-      <div class="kv"><span class="k">Income CAGR</span><span class="v ${cls(tr.income_cagr_pct)}">${pct(tr.income_cagr_pct)}</span></div>
-      <div class="kv"><span class="k"><b>Rent − income spread</b></span><span class="v ${cls(tr.rent_minus_income_spread)}"><b>${pct(tr.rent_minus_income_spread)}</b></span></div>
-      <div class="kv"><span class="k">Home value CAGR</span><span class="v ${cls(tr.home_value_cagr_pct)}">${pct(tr.home_value_cagr_pct)}</span></div>
-      <div class="kv"><span class="k">Rent-to-income</span><span class="v">${tr.rent_to_income?pct(tr.rent_to_income*100,1):'—'} <span class="muted">${tr.rent_burden_flag||''}</span></span></div>
-      <div class="kv"><span class="k">Degree share change</span><span class="v ${cls(tr.edu_share_change_pp)}">${tr.edu_share_change_pp===null?'—':(tr.edu_share_change_pp>0?'+':'')+tr.edu_share_change_pp+' pp'}</span></div>
+    const BURDEN_LABEL={ok:'healthy',burdened:'stretched',severe:'high'};
+    h+=`<div class="card"><h3>How this area has changed</h3>
+      <div class="whylede">Over ${tr.span} — the longest stretch of real data available for this tract.</div>
+      <div class="kvdesc">
+        <div class="kv"><span class="k">Rent, per year</span><span class="v ${cls(tr.rent_cagr_pct)}">${pct(tr.rent_cagr_pct)}</span></div>
+        <div class="kvsub">Average yearly rent increase over the period.</div>
+      </div>
+      <div class="kvdesc">
+        <div class="kv"><span class="k">Income, per year</span><span class="v ${cls(tr.income_cagr_pct)}">${pct(tr.income_cagr_pct)}</span></div>
+        <div class="kvsub">Average yearly increase in local household income.</div>
+      </div>
+      <div class="kvdesc">
+        <div class="kv"><span class="k"><b>Rent outpacing income by</b></span><span class="v ${cls(tr.rent_minus_income_spread)}"><b>${pct(tr.rent_minus_income_spread)}</b></span></div>
+        <div class="kvsub">Positive means rent is climbing faster than paychecks here — the classic sign of a neighborhood heating up. Negative means incomes are keeping pace or ahead.</div>
+      </div>
+      <div class="kvdesc">
+        <div class="kv"><span class="k">Home values, per year</span><span class="v ${cls(tr.home_value_cagr_pct)}">${pct(tr.home_value_cagr_pct)}</span></div>
+        <div class="kvsub">Average yearly change in what homes here are worth.</div>
+      </div>
+      <div class="kvdesc">
+        <div class="kv"><span class="k">Rent burden</span><span class="v">${tr.rent_to_income?pct(tr.rent_to_income*100,1):'—'} <span class="muted">${BURDEN_LABEL[tr.rent_burden_flag]||''}</span></span></div>
+        <div class="kvsub">Share of take-home pay the typical renter here spends on rent. Above 30% is usually considered stretched; above 50% is high.</div>
+      </div>
+      <div class="kvdesc">
+        <div class="kv"><span class="k">College-educated residents</span><span class="v ${cls(tr.edu_share_change_pp)}">${tr.edu_share_change_pp===null?'—':(tr.edu_share_change_pp>0?'+':'')+tr.edu_share_change_pp+' pts'}</span></div>
+        <div class="kvsub">Percentage-point change in adults with a bachelor's degree or higher — a common early signal of a neighborhood attracting new, higher-income residents.</div>
+      </div>
       </div>`;
   }
 

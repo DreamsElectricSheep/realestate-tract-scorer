@@ -10,6 +10,49 @@ note instead (Hub `state/realestate/handoff.md`) — this file is the full histo
 
 ## Session History
 
+### 2026-08-23 (later) — Plain-English rewrite + a CT geography discovery
+
+**Rewrote the jargon out of the deal scanner, deal calculator, and trend
+panel.** Owner's complaint was concrete: "I don't want to have to look up what
+CAGR means." Every industry term now leads with what it means and names the
+jargon second, e.g. "Return if paid in cash / 4.74% / ...Real estate calls
+this the cap rate." Scanner rows now lead with the two numbers a buyer decides
+on — "14.1% a year on your cash · +$8,446/yr left over" — then plain-language
+mortgage coverage ("Comfortably covers the mortgage" / "Does not cover the
+mortgage") instead of a bare DSCR figure. Trend card retitled "How this area
+has changed" with a one-line explainer under every row. Input labels
+de-jargoned too (vacancy → "Months empty / unpaid rent", opex → "Running
+costs").
+
+**Found and fixed another instance of the boundary bug.** The audit fixed
+`score_tracts.py`, but `/api/tract/<geoid>` had the same flaw in a code path I
+never touched: it queried `acs_tract` raw by geoid with no crosswalk, so a
+tract reshaped in the 2020 redesign showed only whichever vintages happened to
+share its exact 2020 geoid. That is what produced the owner's "Trend ·
+2022-2023" — a one-year span silently labeled as the trend. Added
+`load_acs_series_unified()` in `web/app.py`, reusing `acs_boundaries`.
+Verified: a normal tract now spans 2017-2023 (was collapsing for redrawn ones).
+
+**DISCOVERY — Connecticut is a genuine geography exception, and it's the home
+market.** While verifying the fix, found 884 CT tracts with ZERO crosswalk
+coverage — and CT is the *only* affected state (884 of 84,415 nationally).
+Root cause: Connecticut replaced its 8 counties with 9 Planning Regions
+effective 2022, which changed its tract GEOID county prefixes. Confirmed in
+the data:
+  - `tract_geom` (TIGER 2023) CT county codes: 110–190 (Planning Regions)
+  - Census 2010→2020 crosswalk file CT codes: 001–015 (old counties)
+  - `acs_tract`: vintages 2017–2021 use 001–015, vintages 2022–2023 use 110–190
+So the official Census crosswalk predates the change and cannot bridge it.
+Consequence: **CT tracts show only a 2022–2023 trend and cannot get a
+multi-year rent/income signal**, which matters because Hamden CT is the
+distance-filter home base. NOT fixed this session — needs Connecticut's
+specific old-county-tract → planning-region-tract relationship file
+(Census publishes CT-specific 2020→2022 relationship files separately).
+This is the top open item.
+
+Tests still pass (33 checks). Committed and pushed.
+
+
 ### 2026-08-23 — Full audit, then fixed every finding
 
 Audited the whole project against the live database (not by reading code and

@@ -26,8 +26,60 @@ sys.path.insert(0, "/opt/realestate/scripts")
 from flask import Flask, jsonify, render_template, request
 
 from config import LOGS, MIN_COMPLETENESS, SCORE_COMPONENTS
-from db import raw_conn
+from db import raw_conn, engine
 from http_cache import get_json
+
+# Only pulled in for this one job: reconciling the 2010/2020 tract boundary
+# redesign so a single tract's ACS trend actually spans 2017-2023 instead of
+# silently collapsing to whatever years happen to share its exact 2020 geoid.
+# Same bug class the audit fixed in score_tracts.py, different code path --
+# this endpoint queried acs_tract raw with no crosswalk at all.
+import pandas as pd
+from acs_boundaries import unify_acs_boundaries
+
+ACS_TREND_VALUE_COLS = [
+    "population", "median_hh_income", "median_gross_rent", "median_home_value",
+    "median_re_taxes", "tenure_total", "tenure_renter", "edu_total",
+    "edu_bachelors", "edu_masters", "edu_professional", "edu_doctorate",
+    "below_poverty", "median_rent_pct_income",
+]
+
+
+def load_acs_series_unified(geoid: str) -> list[dict]:
+    """
+    Full 2017-2023 ACS series for a 2020-boundary tract, with pre-2020
+    vintages reprojected from their 2010-boundary source(s). Without this,
+    any tract touched by the 2020 redesign only shows whichever native
+    vintages happen to share its exact geoid -- for a newly-split tract,
+    sometimes just one or two years, silently mislabeled as "the trend."
+    """
+    cols_sql = ", ".join(ACS_TREND_VALUE_COLS)
+    native = pd.read_sql(
+        f"SELECT geoid, vintage, {cols_sql} FROM acs_tract "
+        f"WHERE geoid = %(g)s AND vintage >= 2020",
+        engine(), params={"g": geoid},
+    )
+    contributors = pd.read_sql(
+        f"SELECT geoid, vintage, {cols_sql} FROM acs_tract "
+        f"WHERE vintage < 2020 AND geoid IN "
+        f"(SELECT geoid_2010 FROM tract_xwalk_2010_2020 WHERE geoid_2020 = %(g)s)",
+        engine(), params={"g": geoid},
+    )
+    if contributors.empty:
+        combined = native
+    else:
+        crosswalked = unify_acs_boundaries(
+            pd.concat([native, contributors], ignore_index=True), ACS_TREND_VALUE_COLS
+        )
+        combined = crosswalked[crosswalked["geoid"] == geoid] if not crosswalked.empty else native
+
+    if combined.empty:
+        return []
+    combined = combined.sort_values("vintage")
+    # NaN isn't JSON-serializable; the rest of the app already treats missing
+    # ACS fields as None, not 0, so match that rather than coercing to zero.
+    return combined.where(pd.notna(combined), None).to_dict("records")
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -173,13 +225,12 @@ def tract_detail(geoid: str) -> dict:
                WHERE t.geoid = %s AND t.vintage = 2020""", (geoid,))
     out["geography"] = geo[0] if geo else None
 
-    # ACS across every vintage we hold — this is the temporal spine.
-    acs = q("""SELECT vintage, population, median_hh_income, median_gross_rent,
-                      median_home_value, median_re_taxes, tenure_total,
-                      tenure_renter, edu_total, edu_bachelors, edu_masters,
-                      edu_professional, edu_doctorate, below_poverty,
-                      median_rent_pct_income
-               FROM acs_tract WHERE geoid = %s ORDER BY vintage""", (geoid,))
+    # ACS across every vintage we hold, boundary-unified -- this is the
+    # temporal spine. A raw per-geoid query here used to silently return only
+    # whichever vintages happen to share this tract's exact 2020 geoid; for a
+    # tract split or reshaped in the 2020 redesign, that could be a single
+    # year mislabeled as "the trend."
+    acs = load_acs_series_unified(geoid)
     out["acs_series"] = acs
     out["acs_latest"] = acs[-1] if acs else None
 
