@@ -226,6 +226,9 @@
           normal apartment complex can show an oddly high implied yield that
           isn't a real, buyable combination. Treat surprising results as a
           lead to verify on the ground, not a confirmed deal.
+          Every row is priced as a <b>single unit</b>, since a tract's median
+          home value describes one home — use the Deal Calculator for real
+          multi-unit numbers once you have a listing.
         </div>
 
         <div class="fgroup">
@@ -236,10 +239,6 @@
           <label>Max mortgage you're willing to take</label>
           <input type="number" id="s-loan" placeholder="e.g. 240000">
           <div class="muted" style="font-size:11px;margin-top:4px" id="s-budget-hint"></div>
-        </div>
-        <div class="fgroup">
-          <label>Assumed units per property</label>
-          <input type="number" id="s-units" value="1" min="1">
         </div>
         <div class="fgroup">
           <label>Mortgage rate (annual)</label>
@@ -272,6 +271,16 @@
         <div class="fgroup">
           <label>Assumed annual insurance (flat, applied everywhere — no per-area data source)</label>
           <input type="number" id="s-ins" value="1500" min="0">
+        </div>
+        <div class="fgroup">
+          <label>Minimum neighborhood score</label>
+          <div class="qpicks" id="s-quickscore">
+            <span class="qpick active" data-v="">Any</span>
+            <span class="qpick" data-v="50">50+</span>
+            <span class="qpick" data-v="65">65+</span>
+            <span class="qpick" data-v="80">80+</span>
+          </div>
+          <div class="muted" style="font-size:11px;margin-top:4px">Ranks by cash return <i>within</i> areas the scorer rates well, instead of on yield alone.</div>
         </div>
         <div class="fgroup">
           <label>State (optional)</label>
@@ -504,12 +513,23 @@
       <div class="row"><span class="sw" style="background:#932667"></span> 20–40</div>
       <div class="row"><span class="sw" style="background:#420a68"></span> 0–20 cold</div>
       <div class="row"><span class="sw" style="background:#3a3f4b"></span> no data</div>
+      <div class="row" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--line)">
+        <span class="sw" style="background:#fca50a;opacity:.3;border:1px dashed #6b7280"></span> thin data
+      </div>
     </div>
   </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
+// ---- injected from config.py at render time, never restated in this file ----
+// These used to be hand-maintained copies of the scorer's constants, and went
+// stale the moment the model was recalibrated: the "Why this score" panel
+// confidently explained a formula the scorer was no longer using. Declared
+// first so anything below can use them regardless of call order.
+const SCORE_COMPONENTS={{ score_components | tojson }};
+const MIN_COMPLETENESS={{ min_completeness }};
+
 const map = L.map('map', {preferCanvas:true}).setView([39.5,-98.35], 4);
 const DEFAULT_VIEW=[[39.5,-98.35],4];
 
@@ -532,10 +552,18 @@ function color(v){
   if(v===null||v===undefined) return '#3a3f4b';
   return v>=80?'#fcffa4':v>=60?'#fca50a':v>=40?'#dd513a':v>=20?'#932667':'#420a68';
 }
+// The map used to ignore MIN_COMPLETENESS entirely, so a tract scored on 2 of
+// 5 components rendered in the same confident color as one scored on all 5.
+// Rather than hide thin tracts, they render faded and dashed and say so on
+// hover -- absence of data is itself worth seeing on a map.
 function style(f){
-  const s=f.properties.score;
-  return {fillColor:color(s), weight:.4, color:'#11141a',
-          fillOpacity:s===null||s===undefined?0.18:0.72};
+  const p=f.properties, s=p.score;
+  if(s===null||s===undefined) return {fillColor:color(null),weight:.4,color:'#11141a',fillOpacity:0.18};
+  const thin = p.completeness!=null && p.completeness < MIN_COMPLETENESS;
+  return {fillColor:color(s), weight:thin?.8:.4,
+          color:thin?'#6b7280':'#11141a',
+          dashArray:thin?'2,3':null,
+          fillOpacity:thin?0.28:0.72};
 }
 
 // Cluster metadata shared between the filter cards and result-list dots/badges.
@@ -581,6 +609,14 @@ STATES.forEach(([fips,ab])=>{const o=document.createElement('option');o.value=fi
 const scanDistSwitch=document.getElementById('s-dist-on');
 scanDistSwitch.addEventListener('click',()=>{scanDistSwitch.dataset.on = scanDistSwitch.dataset.on==='true'?'false':'true';});
 
+let scanMinScore='';
+document.getElementById('s-quickscore').addEventListener('click',e=>{
+  const q=e.target.closest('.qpick'); if(!q) return;
+  document.querySelectorAll('#s-quickscore .qpick').forEach(el=>el.classList.remove('active'));
+  q.classList.add('active');
+  scanMinScore=q.dataset.v;
+});
+
 function updateBudgetHint(){
   const d=parseFloat(document.getElementById('s-down').value)||0;
   const l=parseFloat(document.getElementById('s-loan').value)||0;
@@ -600,7 +636,6 @@ document.getElementById('s-scan').onclick=()=>{
   }
   const p=new URLSearchParams();
   p.set('down_payment',down); p.set('max_loan',loan);
-  p.set('units',document.getElementById('s-units').value||1);
   p.set('rate',document.getElementById('s-rate').value||7);
   p.set('term',document.getElementById('s-term').value||30);
   p.set('vacancy',document.getElementById('s-vacancy').value||7);
@@ -608,6 +643,7 @@ document.getElementById('s-scan').onclick=()=>{
   p.set('insurance',document.getElementById('s-ins').value||0);
   p.set('limit',75);
   const st=scanStateSel.value; if(st) p.set('state',st);
+  if(scanMinScore) p.set('min_score',scanMinScore);
   if(scanDistSwitch.dataset.on==='true'){
     const mi=document.getElementById('s-dist-mi').value;
     if(mi) p.set('max_miles',mi);
@@ -626,11 +662,15 @@ document.getElementById('s-scan').onclick=()=>{
         const price=Number(t.price), rent=Number(t.rent_per_unit);
         const rentToPrice=(rent*12/price*100);
         const cfClass=Number(t.annual_cash_flow)>0?'pos':'neg';
+        const cl=CLUSTERS[t.moran_cluster];
+        const sc=t.score!=null?Number(t.score):null;
         h+=`<div class="resultitem" data-lat="${t.intptlat}" data-lon="${t.intptlon}" data-geoid="${t.geoid}" style="align-items:flex-start">
+          <span class="rdot" style="background:${cl?cl.color:'#3a3f4b'};margin-top:5px"></span>
           <div class="rmain">
             <div class="rname">${t.county_name||t.name||t.geoid}</div>
-            <div class="rmeta">${fmtUSD(price)} · ${fmtUSD(rent)}/mo/unit · annual rent is ${rentToPrice.toFixed(1)}% of price</div>
+            <div class="rmeta">${fmtUSD(price)} · ${fmtUSD(rent)}/mo · annual rent is ${rentToPrice.toFixed(1)}% of price</div>
             <div class="rmeta">Cap ${fmtPct(Number(t.cap_rate))} · Cash flow <span class="${cfClass}">${fmtUSD(t.annual_cash_flow)}/yr</span> · CoC ${t.cash_on_cash!=null?fmtPct(Number(t.cash_on_cash)):'—'}${t.dscr!=null?' · DSCR '+Number(t.dscr).toFixed(2):''}</div>
+            <div class="rmeta">Neighborhood ${sc!=null?'<b style="color:var(--tx)">'+sc.toFixed(1)+'/100</b>':'<span class="mid">not scored</span>'}${cl?' · '+cl.label:''}</div>
           </div>
         </div>`;
       });
@@ -681,6 +721,9 @@ document.getElementById('c-lookup').onclick=()=>{
     .catch(()=>{ status.textContent='Lookup failed.'; });
 };
 
+// Matches the scanner's server-side default so the two tools agree.
+const DEFAULT_INSURANCE=1500;
+
 function fmtUSD(v){ return v==null||isNaN(v)?'—':'$'+Math.round(v).toLocaleString(); }
 function fmtPct(v){ return v==null||isNaN(v)?'—':v.toFixed(2)+'%'; }
 
@@ -694,7 +737,13 @@ document.getElementById('c-compute').onclick=()=>{
   const vacancyPct=parseFloat(document.getElementById('c-vacancy').value)||0;
   const opexPct=parseFloat(document.getElementById('c-opex').value)||0;
   const tax=parseFloat(document.getElementById('c-tax').value)||0;
-  const ins=parseFloat(document.getElementById('c-ins').value)||0;
+  // Insurance is the one input with no free data source, so it's the one most
+  // often left blank -- and treating blank as $0 quietly made every deal look
+  // better than it is. Assume a placeholder instead and say so in the output.
+  const insRaw=parseFloat(document.getElementById('c-ins').value);
+  const insAssumed=isNaN(insRaw);
+  const ins=insAssumed?DEFAULT_INSURANCE:insRaw;
+  const taxAssumed=!document.getElementById('c-tax').value;
 
   const box=document.getElementById('c-results');
   if(!price || !rentPerUnit){
@@ -730,8 +779,8 @@ document.getElementById('c-compute').onclick=()=>{
       <div class="kv"><span class="k">Gross potential rent (annual)</span><span class="v">${fmtUSD(gpr)}</span></div>
       <div class="kv"><span class="k">Effective gross income</span><span class="v">${fmtUSD(egi)}</span></div>
       <div class="kv"><span class="k">Operating expenses</span><span class="v">${fmtUSD(opex)}</span></div>
-      <div class="kv"><span class="k">Property tax</span><span class="v">${fmtUSD(tax)}</span></div>
-      <div class="kv"><span class="k">Insurance</span><span class="v">${fmtUSD(ins)}</span></div>
+      <div class="kv"><span class="k">Property tax${taxAssumed?' <span class="mid">(not entered)</span>':''}</span><span class="v">${fmtUSD(tax)}</span></div>
+      <div class="kv"><span class="k">Insurance${insAssumed?' <span class="mid">(assumed)</span>':''}</span><span class="v">${fmtUSD(ins)}</span></div>
       <div class="kv"><span class="k"><b>Net operating income</b></span><span class="v"><b>${fmtUSD(noi)}</b></span></div>
       <div class="kv"><span class="k"><b>Cap rate</b></span><span class="v"><b>${fmtPct(capRate)}</b></span></div>
     </div>
@@ -749,7 +798,10 @@ document.getElementById('c-compute').onclick=()=>{
       <div class="kv"><span class="k"><b>Cash-on-cash return</b></span><span class="v ${cfClass}"><b>${cashOnCash==null?'—':fmtPct(cashOnCash)}</b></span></div>
       <div class="kv"><span class="k">DSCR</span><span class="v ${dscrClass}">${dscr==null?'—':dscr.toFixed(2)}</span></div>
       <div class="muted" style="font-size:11px;margin-top:10px">DSCR below 1.0 means the property's own income doesn't cover the mortgage — most lenders want at least 1.20-1.25.</div>
-    </div>`;
+    </div>
+    ${(insAssumed||taxAssumed)?`<div class="banner">
+      <b>Some costs weren't entered.</b> ${insAssumed?`Insurance assumed at ${fmtUSD(DEFAULT_INSURANCE)}/yr — real premiums vary enormously by location and can be several times that on the coast. `:''}${taxAssumed?'Property tax counted as $0, which no property has. ':''}Fill these in for a number you can act on.
+    </div>`:''}`;
   box.scrollIntoView({behavior:'smooth', block:'start'});
 };
 
@@ -937,7 +989,9 @@ function loadTracts(){
       const p=f.properties;
       const cl=CLUSTERS[p.moran_cluster];
       const title=p.county_name ? `${p.county_name} <span class="muted" style="font-weight:400">· ${p.name||p.geoid}</span>` : (p.name||p.geoid);
-      l.bindTooltip(`<b>${title}</b><br>score ${p.score??'—'}${p.is_oz?' · OZ':''}${cl?' · '+cl.label:''}${p.distance_mi!=null?' · '+p.distance_mi+' mi away':''}<br><span class="muted">click for full detail</span>`);
+      const thin = p.completeness!=null && p.completeness < MIN_COMPLETENESS;
+      const thinNote = thin ? `<br><span class="mid">thin data — scored on only ${Math.round(p.completeness*100)}% of inputs</span>` : '';
+      l.bindTooltip(`<b>${title}</b><br>score ${p.score??'—'}${p.is_oz?' · OZ':''}${cl?' · '+cl.label:''}${p.distance_mi!=null?' · '+p.distance_mi+' mi away':''}${thinNote}<br><span class="muted">click for full detail</span>`);
       // Zoom in on the clicked tract itself (capped at 14 -- past that,
       // CARTO's label tiles show individual streets/neighborhoods, which is
       // the "what cities/towns am I actually looking at" context the county
@@ -948,21 +1002,6 @@ function loadTracts(){
 }
 map.on('moveend', loadTracts);
 
-// Mirrors WEIGHTS in scripts/score_tracts.py -- keep these in sync if the
-// scorer is recalibrated. Plain-English labels are what turn "s_rent_momentum:
-// 71" into an actual answer to "why is this area scored the way it is."
-const SCORE_COMPONENTS=[
-  {key:'s_rent_momentum',    label:'Rent growth vs. income growth', weight:22,
-   desc:"How much faster rent is rising here than local incomes -- the core \"getting hot\" signal."},
-  {key:'s_spatial',          label:'Walkability & transit access',  weight:18,
-   desc:'Proximity to universities, transit, hospitals, and other amenities.'},
-  {key:'s_supply_risk',      label:'New construction risk',         weight:22,
-   desc:'Higher is better here -- it means fewer new apartments are being built nearby to compete with.'},
-  {key:'s_affordability',    label:'Room for rent to grow',         weight:12,
-   desc:"Rent is high enough to matter but hasn't already maxed out what renters can pay."},
-  {key:'s_education_influx', label:'Education influx',              weight:11,
-   desc:'Growth in college-educated residents moving into the area.'},
-];
 
 // Deep-links straight into Zillow's map search, zoomed to the tract's own
 // bounding box, rather than a generic city-wide search -- this is the same
@@ -994,7 +1033,7 @@ function whyCard(s){
       <div class="whybar"><div class="whyfill" style="width:${p}%"></div></div>
       <div class="whydesc">${c.desc}</div></div>`;
   });
-  h+=`<div class="muted" style="font-size:11px;margin-top:12px">Safety and local-regulation signals aren't available nationwide yet, so they're held neutral rather than guessed at.</div></div>`;
+  h+=`<div class="muted" style="font-size:11px;margin-top:12px">These five are the whole score — crime and local-regulation data aren't available nationwide, so they're left out rather than guessed at.</div></div>`;
   return h;
 }
 

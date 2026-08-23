@@ -68,12 +68,25 @@ CREATE TABLE IF NOT EXISTS tract_xwalk_2010_2020 (
 CREATE INDEX IF NOT EXISTS idx_xwalk_2020 ON tract_xwalk_2010_2020 (geoid_2020);
 
 -- ============================================================ ground truth (Phase 3)
-CREATE TABLE IF NOT EXISTS fhfa_hpi_tract (
-    geoid       TEXT NOT NULL,
+-- NOTE: there is deliberately no fhfa_hpi_tract table. FHFA's public HPI
+-- product has no tract-level series (verified 2026-08-09: every county/tract
+-- filename pattern 404s, and the master file's finest "level" value is MSA).
+-- A table for it existed here and sat empty forever, reading like unfinished
+-- work rather than an impossibility. The MSA series below is what exists;
+-- tracts inherit their metro's trajectory via county_cbsa_xwalk.
+CREATE TABLE IF NOT EXISTS fhfa_hpi_msa (
+    cbsa_code   TEXT NOT NULL,
+    place_name  TEXT,
     year        INT  NOT NULL,
-    hpi         NUMERIC(12,4),
+    index_nsa   NUMERIC(12,4),
     annual_pct  NUMERIC(8,4),
-    PRIMARY KEY (geoid, year)
+    PRIMARY KEY (cbsa_code, year)
+);
+CREATE TABLE IF NOT EXISTS county_cbsa_xwalk (
+    county_fips TEXT PRIMARY KEY,
+    cbsa_code   TEXT,
+    cbsa_title  TEXT,
+    metro_micro TEXT
 );
 
 CREATE TABLE IF NOT EXISTS zillow_series (

@@ -55,7 +55,10 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from config import LOGS
+from acs_boundaries import crosswalk_2010_to_2020
+# Imported from config, not from score_tracts: same single source of truth,
+# without dragging geopandas into this script's import chain.
+from config import LOGS, SCORE_WEIGHTS as LIVE_WEIGHTS
 from db import engine, log_ingest, raw_conn
 
 logging.basicConfig(
@@ -71,36 +74,6 @@ LATE_Y = 2023                     # 2020-boundary vintage, ACS-native outcome
 SUPPLY_CUTOFF = 2019              # bps_permits year <= this only
 
 MIN_WEIGHT_PCT = 3.0  # floor so a weak-IC component isn't zeroed on one window
-
-
-# ------------------------------------------------------------ crosswalk helper
-def crosswalk_2010_to_2020(df: pd.DataFrame, value_cols: list[str]) -> pd.DataFrame:
-    """
-    Area-weighted reprojection of 2010-tract-indexed rows onto 2020 geoids.
-
-    A 2010 tract that split into several 2020 tracts contributes its value to
-    each of them; a 2020 tract assembled from multiple 2010 tracts gets the
-    area-weighted average of its contributors. This is the same crosswalk
-    table ingest_oz.py uses for Opportunity Zones -- reused here because the
-    boundary-vintage mismatch is exactly the same problem.
-    """
-    xwalk = pd.read_sql(
-        "SELECT geoid_2010, geoid_2020, area_weight FROM tract_xwalk_2010_2020",
-        engine(),
-    )
-    m = xwalk.merge(df, left_on="geoid_2010", right_on="geoid", how="inner")
-    if m.empty:
-        return pd.DataFrame(columns=["geoid"] + value_cols)
-
-    out = {"geoid": m.groupby("geoid_2020").size().index}
-    grouped = m.groupby("geoid_2020")
-    result = pd.DataFrame(index=grouped.size().index)
-    for col in value_cols:
-        w = m["area_weight"].fillna(0)
-        wv = m[col] * w
-        result[col] = wv.groupby(m["geoid_2020"]).sum() / w.groupby(m["geoid_2020"]).sum().replace(0, np.nan)
-    result = result.reset_index().rename(columns={"geoid_2020": "geoid"})
-    return result
 
 
 # ------------------------------------------------------------ predictor (early score)
@@ -295,8 +268,12 @@ def main() -> int:
     df["s_affordability"] = afford.clip(0, 100)
 
     comp_cols = ["s_rent_momentum", "s_spatial", "s_supply_risk", "s_affordability", "s_education_influx"]
-    CURRENT_WEIGHTS = {"s_rent_momentum": 30, "s_spatial": 20, "s_supply_risk": 15,
-                        "s_affordability": 10, "s_education_influx": 10}
+    # Read the baseline from the live scorer instead of restating it. A
+    # hardcoded copy here went stale the moment the weights were retuned, so
+    # this script's "current vs fitted" table compared against numbers that
+    # were not deployed anywhere.
+    CURRENT_WEIGHTS = {c: LIVE_WEIGHTS[c] for c in comp_cols}
+    BACKTESTABLE_TOTAL = sum(CURRENT_WEIGHTS.values())
     avail = df[comp_cols].notna()
     weight_arr = np.array([CURRENT_WEIGHTS[c] for c in comp_cols])
     weighted_sum = (df[comp_cols].fillna(0).values * weight_arr).sum(axis=1)
@@ -347,17 +324,17 @@ def main() -> int:
         raw_pct = {c: (abs_ic[c] / total) * 100 for c in comp_cols}
         floored = {c: max(v, MIN_WEIGHT_PCT) for c, v in raw_pct.items()}
         renorm_total = sum(floored.values())
-        new_weights = {c: round(v / renorm_total * 90, 1) for c, v in floored.items()}
-        # 90, not 100: safety(10) and regulatory(5->reserved) stay neutral-midpoint
-        # placeholders until crime_agency / reg_flags are populated -- see
-        # score_tracts.py. Rescale the 5 backtestable components to 90 so the
-        # full weight vector (fitted 90 + safety 10 stays as before) still
-        # sums to 100 once regulatory's own reserved slice is folded back in.
-        # Simpler and more honest: just report the fitted 5-component vector
-        # and let score_tracts.py fold it into the full vector explicitly.
+        # Rescale to the SAME total the live backtestable components carry, so
+        # "current" and "fitted" are directly comparable column-to-column. The
+        # non-backtestable components (safety, regulatory) keep their own
+        # weights untouched -- they are neutral placeholders, not fitted here.
+        new_weights = {c: round(v / renorm_total * BACKTESTABLE_TOTAL, 1)
+                        for c, v in floored.items()}
 
-    log.info("=== refit result (weights proportional to |IC| vs FHFA outcome, floor=%.0f%%) ===",
+    log.info("=== refit result (weights proportional to |IC| vs FHFA outcome, floor=%.0f pct) ===",
               MIN_WEIGHT_PCT)
+    log.info("  (both columns sum to %d, the live total for these 5 components)",
+              BACKTESTABLE_TOTAL)
     for c in comp_cols:
         log.info("  %-20s current=%5.1f  ic=%7s  fitted=%5.1f",
                   c, CURRENT_WEIGHTS[c], primary_ic.get(c), new_weights[c])

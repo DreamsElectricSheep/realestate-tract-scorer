@@ -118,6 +118,55 @@ OSM_POI_FILTERS = {
 
 PROXIMITY_RADIUS_M = 5000
 
+# ---------------------------------------------------------------- scoring
+# Single source of truth for the composite score. Lives here, in the one module
+# with no heavy dependencies, because THREE consumers need it and every copy
+# that got restated somewhere went stale: score_tracts.py computes with it,
+# calibrate.py backtests against it, and the dashboard explains it to the user.
+#
+# Weights sum to 100 across components that actually carry signal. Two earlier
+# components (safety, regulatory) were removed rather than left at a hardcoded
+# neutral 50 -- see score_tracts.py. Calibrated 2026-08-22; the proportions
+# come from a backtest of ACS 2017->2019 predictors against realized
+# 2019->2025 FHFA appreciation, blended by judgment rather than applied raw
+# (see calibrate.py and CLAUDE_MEMORY.md for why).
+SCORE_COMPONENTS = [
+    {
+        "key": "s_rent_momentum", "weight": 26,
+        "label": "Rent growth vs. income growth",
+        "desc": "How much faster rent is rising here than local incomes "
+                "-- the core “getting hot” signal.",
+    },
+    {
+        "key": "s_supply_risk", "weight": 26,
+        "label": "New construction risk",
+        "desc": "Higher is better: fewer new apartments are being built nearby "
+                "to compete with.",
+    },
+    {
+        "key": "s_spatial", "weight": 21,
+        "label": "Walkability & transit access",
+        "desc": "Proximity to universities, transit, hospitals and other amenities.",
+    },
+    {
+        "key": "s_affordability", "weight": 14,
+        "label": "Room for rent to grow",
+        "desc": "Rent is high enough to matter but hasn't already maxed out "
+                "what renters can pay.",
+    },
+    {
+        "key": "s_education_influx", "weight": 13,
+        "label": "Education influx",
+        "desc": "Growth in college-educated residents moving into the area.",
+    },
+]
+
+SCORE_WEIGHTS = {c["key"]: c["weight"] for c in SCORE_COMPONENTS}
+
+# Below this share of components present, a tract's score is not published to
+# the leaderboard and renders as "thin data" on the map.
+MIN_COMPLETENESS = 0.6
+
 # ---------------------------------------------------------------- misc
 USER_AGENT = "DeepRock-RealEstate-Scorer/1.0 (personal research; contact ccast77@gmail.com)"
 REQUEST_TIMEOUT = 45  # seconds. The reference implementation had no timeouts at all.

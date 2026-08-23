@@ -35,7 +35,8 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from config import LOGS
+from acs_boundaries import unify_acs_boundaries
+from config import LOGS, MIN_COMPLETENESS, SCORE_WEIGHTS
 from db import engine, log_ingest, raw_conn
 
 logging.basicConfig(
@@ -66,16 +67,11 @@ log = logging.getLogger("score_tracts")
 # dropped more since that's where the backtest evidence was strongest and
 # most consistent. s_supply_risk -- the cleanest, most consistent signal in
 # the backtest -- got the largest increase.
-WEIGHTS = {
-    "s_rent_momentum": 22,     # rent CAGR minus income CAGR spread (was 30; backtest: negative IC)
-    "s_spatial": 18,           # POI proximity (was 20; light trim only -- still a real signal)
-    "s_supply_risk": 22,       # inverted: heavy multifamily permitting = penalty (was 15; cleanest signal)
-    "s_affordability": 12,     # moderate burden = room to grow; extreme = risk (was 10)
-    "s_education_influx": 11,  # change in bachelor's-or-higher share (was 10; inconclusive backtest)
-    "s_safety": 10,            # neutral (50) until crime_agency is populated
-    "s_regulatory": 5,         # neutral (50) until reg_flags is populated
-}
-MIN_COMPLETENESS = 0.6  # below this, dashboard/rollups exclude the tract
+# Weights and the completeness threshold both live in config.py -- see the
+# comment there. They are imported rather than restated because every prior
+# copy of them (in calibrate.py, in the dashboard template) went stale the
+# moment the weights were retuned.
+WEIGHTS = SCORE_WEIGHTS
 
 
 def pct_rank(s: pd.Series) -> pd.Series:
@@ -87,10 +83,14 @@ def pct_rank(s: pd.Series) -> pd.Series:
     return ranks
 
 
+ACS_TREND_COLS = ["median_hh_income", "median_gross_rent", "edu_total",
+                   "edu_bachelors", "edu_masters", "edu_professional", "edu_doctorate"]
+
+
 def load_acs_trends() -> pd.DataFrame:
     df = pd.read_sql("""
-        SELECT geoid, vintage, population, median_hh_income, median_gross_rent,
-               median_home_value, edu_total, edu_bachelors, edu_masters,
+        SELECT geoid, vintage, median_hh_income, median_gross_rent,
+               edu_total, edu_bachelors, edu_masters,
                edu_professional, edu_doctorate
         FROM acs_tract ORDER BY geoid, vintage
     """, engine())
@@ -99,6 +99,13 @@ def load_acs_trends() -> pd.DataFrame:
                     "be null for every tract until the Census API key is added "
                     "and ingest_acs.py has run")
         return pd.DataFrame(columns=["geoid"])
+
+    # Reconcile the 2010/2020 tract boundary redesign BEFORE grouping by geoid.
+    # Without this, any tract redrawn in 2020 has its 2017 start compared
+    # against its 2023 end across two different polygons -- 19,571 scored
+    # tracts were affected before this call existed. See acs_boundaries.py.
+    df = unify_acs_boundaries(df, ACS_TREND_COLS)
+    df = df.sort_values(["geoid", "vintage"])
 
     out = []
     for geoid, g in df.groupby("geoid"):
@@ -266,7 +273,11 @@ def main() -> int:
             JOIN opportunity_zones o ON o.geoid_2010 = x.geoid_2010
         """, engine())
         df = df.merge(oz, on="geoid", how="left")
-        df["is_opportunity_zone"] = df["is_oz"].fillna(False)
+        # Cast to bool explicitly rather than relying on fillna's implicit
+        # object->bool downcast, which pandas has deprecated and will stop
+        # doing -- at which point this column would silently become object
+        # dtype and the boolean write to Postgres would start failing.
+        df["is_opportunity_zone"] = df["is_oz"].notna() & df["is_oz"].astype(bool)
     else:
         df["is_opportunity_zone"] = None
 
@@ -289,10 +300,11 @@ def main() -> int:
     df["s_supply_risk"] = 100 - pct_rank(df["supply_raw"]).fillna(50)
     df.loc[df["supply_raw"].isna(), "s_supply_risk"] = np.nan
 
-    # Not yet ingested — neutral midpoint rather than penalizing every tract
-    # for a layer that simply hasn't been built yet.
-    df["s_safety"] = 50.0
-    df["s_regulatory"] = 50.0
+    # Written as NULL, not 50: these layers were never ingested, and a stored
+    # 50 reads as "measured, average" to anything querying the table later.
+    # They are also no longer in WEIGHTS, so they contribute nothing either way.
+    df["s_safety"] = np.nan
+    df["s_regulatory"] = np.nan
 
     log.info("=== weighted composite ===")
     comp_cols = list(WEIGHTS.keys())

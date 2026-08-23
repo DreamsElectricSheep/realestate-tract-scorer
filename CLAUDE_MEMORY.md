@@ -10,6 +10,98 @@ note instead (Hub `state/realestate/handoff.md`) — this file is the full histo
 
 ## Session History
 
+### 2026-08-23 — Full audit, then fixed every finding
+
+Audited the whole project against the live database (not by reading code and
+inferring) and then fixed all 18 findings. Audit report published as an
+artifact: https://claude.ai/code/artifact/4b588bca-ca78-49a2-ac8b-eaba737130a8
+
+**The big one — boundary mixing corrupted the core signal for 23% of tracts.**
+`score_tracts.py::load_acs_trends()` computed rent/income CAGR with a plain
+`groupby("geoid")` across all seven ACS vintages. But 2017–2019 sit on 2010
+tract boundaries and 2020–2023 on 2020 boundaries, and a GEOID can survive
+the redesign while its polygon changes shape. Measured: of 60,853 GEOIDs in
+both the 2017 and 2023 vintages, 39,766 are unchanged but **21,069 were split
+or only partially overlap**; 19,571 scored tracts carried a mixed-boundary
+trend. Worse, `calibrate.py` *did* crosswalk correctly — so the backtest fit
+weights against a clean feature and the scorer applied them to a noisy one.
+Fix: new `scripts/acs_boundaries.py` (`crosswalk_2010_to_2020`,
+`unify_acs_boundaries`), imported by **both** scripts so they cannot diverge
+again. Also fixed a latent bug in the original crosswalk: it summed a
+NaN-skipping numerator over a full-weight denominator, biasing every
+partially-null tract downward. After the fix, 83,494 tracts have a full
+2017→2023 span on *consistent* boundaries (up from 60,853 mixed).
+
+**Two calculator traps that silently flattered every deal.**
+(1) `/api/scan` accepted a `units` multiplier that scaled rent but not price —
+since price is the tract's median value for ONE home, `units=3` produced a
+24.4% cap rate vs 10.3% at `units=1` on the same scan. Removed the field
+entirely; there is no honest way to scale a single-home median to a multi-unit
+building without listing data. (2) The Deal Calculator treated blank insurance
+as $0 — the one input with no free data source, so the one most often left
+blank. Now defaults to $1,500, labels it "(assumed)", and warns below the
+results.
+
+**Closed the structural split.** `/api/scan` never joined `tract_scores`, so
+months of neighborhood scoring and the money math were two separate products.
+It now returns score + Moran cluster per row and accepts `min_score`, so you
+can rank by cash return *within* areas the scorer rates well.
+
+**Score now means what it says.** `s_safety` (10) and `s_regulatory` (5) were
+hardcoded to 50 for every tract in the country because `crime_agency` and
+`reg_flags` were never populated — 15 of every 100 points were a constant.
+Removed from the weight vector rather than faked (writing NULL, not 50, so
+nothing downstream reads them as "measured average"). Remaining five rescaled
+to sum to 100: rent momentum 26, supply risk 26, spatial 21, affordability 14,
+education 13. Top score moved 84.5 → 89.2 as the constant drag came out; rank
+order essentially preserved.
+
+**Killed the weight-drift bug class for good.** Weights had been restated in
+three places (scorer, calibrator, dashboard template) and all three had gone
+stale. Now defined once in `config.py::SCORE_COMPONENTS` and imported by the
+scorer, the calibrator, and injected into the template at render time.
+
+**Other fixes:** map now renders sub-threshold tracts faded/dashed with a
+"thin data" tooltip and legend entry instead of coloring them identically to
+fully-scored ones; `calibrate.py` baseline read from live config and both
+comparison columns rescaled to the same total; pandas `fillna` downcast
+deprecation resolved before its behavior flips; dropped `fhfa_hpi_tract`
+(FHFA publishes no tract-level series — it could never be filled); removed
+unused `metric` param; corrected the stale port-5007 docstring.
+
+**Ops, all previously absent:** `scripts/backup_db.sh` (core dump 26 MB +
+full dump 703 MB, both verified restorable via `pg_restore --list` and gzip
+integrity check, 30-day retention); `scripts/refresh_all.sh`; cron installed
+at 03:15 nightly backup and 04:30 monthly refresh — verified the existing 61
+trading-fleet cron lines were preserved and the cron daemon is running.
+`requirements.txt` pinned from the live venv (45 packages, Python 3.10.12).
+`tests/test_core.py` — 33 checks covering crosswalk arithmetic (including the
+null-weight regression) and the SQL scanner's deal math against independently
+computed reference formulas; all pass. `README.md` written (project had none).
+
+**Re-calibrated after the fix.** Decile spread improved from **−2.19pp to
+−0.48pp** — close to flat now, still marginally the wrong sign. Recorded as
+`calibration_report` row 2.
+
+**Still open / deliberately not done:**
+- **The score remains unvalidated.** −0.48pp is not predictive lift. The
+  window straddles COVID migration, which plausibly explains it, but that is
+  a hypothesis. Testing it properly needs older ACS vintages (2013–2016) to
+  build a non-COVID control window.
+- `zillow_series` — 596,654 rows ingested, still consumed by nothing. Best
+  candidate for the next real feature (fresher, monthly cross-check on the
+  ACS rent trend).
+- `qcew_county`, `irs_migration`, `opportunity_zones`, `crime_agency`,
+  `reg_flags` still empty. IRS county-to-county migration was flagged early as
+  a better "affluent influx" measure than the POI counting that carries 21
+  weight points. `reg_flags` was NOT populated deliberately — those are
+  verifiable legal facts about real jurisdictions and inventing them would be
+  worse than leaving the table empty.
+- Dashboard still runs on Flask's dev server (LAN-only, single user).
+- DB password still hardcoded in `config.py` (accepted risk; repo is private,
+  Postgres bound to 127.0.0.1 only).
+
+
 ### 2026-08-19 — Full pipeline goes live end-to-end
 
 **What changed:**

@@ -2,11 +2,14 @@
 """
 Real Estate Scorer dashboard.
 
-  http://192.168.1.252:5007
+  http://192.168.1.252:5008
 
-Two things it does:
+Four things it does:
   1. Address lookup  — paste an address, get everything we know about its tract.
   2. Hot zone map    — national choropleth (county), drilling to tract on zoom.
+  3. Deal calculator — underwrite one property from listing numbers.
+  4. Deal scanner    — rank every tract in the country by cash-on-cash return
+                       for a given down payment and mortgage size.
 
 Every panel degrades gracefully. Layers that haven't been ingested yet render as
 "not loaded" rather than as zeros — a missing input must never look like a bad
@@ -22,7 +25,7 @@ sys.path.insert(0, "/opt/realestate/scripts")
 
 from flask import Flask, jsonify, render_template, request
 
-from config import LOGS
+from config import LOGS, MIN_COMPLETENESS, SCORE_COMPONENTS
 from db import raw_conn
 from http_cache import get_json
 
@@ -100,7 +103,11 @@ def layer_status() -> dict:
 # ------------------------------------------------------------------ routes
 @app.route("/")
 def index():
-    return render_template("index.html", status=layer_status())
+    # Weights come from config so the "Why this score" panel can never disagree
+    # with what the scorer actually computed.
+    return render_template("index.html", status=layer_status(),
+                           score_components=SCORE_COMPONENTS,
+                           min_completeness=MIN_COMPLETENESS)
 
 
 @app.route("/api/health")
@@ -267,7 +274,6 @@ def api_tract(geoid: str):
 @app.route("/api/counties.geojson")
 def counties_geojson():
     """National view. 3,143 simplified county polygons — light enough for a browser."""
-    metric = request.args.get("metric", "score")
     if not table_populated("county_geom"):
         return jsonify({"type": "FeatureCollection", "features": [],
                         "note": "county_geom not built yet"})
@@ -301,7 +307,7 @@ def counties_geojson():
                 "scored_tracts": r["scored_tracts"],
             },
         })
-    return jsonify({"type": "FeatureCollection", "features": feats, "metric": metric})
+    return jsonify({"type": "FeatureCollection", "features": feats})
 
 
 def apply_common_filters(where: str, params: list, alias: str = "t") -> tuple[str, list]:
@@ -460,7 +466,15 @@ def deal_scan():
 
     rate = request.args.get("rate", default=7.0, type=float)
     term_years = request.args.get("term", default=30, type=int)
-    units = request.args.get("units", default=1, type=float)
+    # NOT configurable, deliberately. This used to accept a `units` multiplier
+    # that scaled rent but NOT price -- since `price` here is the tract's
+    # median value for ONE home, setting units=3 tripled income against an
+    # unchanged purchase price and produced impossible cap rates (measured:
+    # 24.4% at units=3 vs 10.3% at units=1 on the same scan). There is no
+    # honest way to scale a single-home median to a multi-unit building
+    # without real listing data, so the screen is strictly one-unit and the
+    # per-property Deal Calculator handles real multi-unit deals instead.
+    units = 1.0
     vacancy = request.args.get("vacancy", default=7.0, type=float)
     opex = request.args.get("opex", default=40.0, type=float)
     insurance = request.args.get("insurance", default=1500.0, type=float)
@@ -479,6 +493,10 @@ def deal_scan():
     if state:
         extra_where += " AND t.state_fips = %(state)s"
         params["state"] = state
+    min_score = request.args.get("min_score", type=float)
+    if min_score is not None:
+        extra_where += " AND sc.score >= %(min_score)s"
+        params["min_score"] = min_score
     if max_miles and max_miles > 0:
         extra_where += (" AND ST_Distance(ST_SetSRID(ST_MakePoint(t.intptlon,t.intptlat),4326)::geography,"
                          " ST_SetSRID(ST_MakePoint(%(home_lon)s,%(home_lat)s),4326)::geography) / 1609.34"
@@ -490,13 +508,19 @@ def deal_scan():
         SELECT t.geoid, t.name, t.state_fips, c.name AS county_name,
                t.intptlat, t.intptlon,
                a.median_home_value AS price, a.median_gross_rent AS rent_per_unit,
-               COALESCE(a.median_re_taxes, 0) AS tax
+               COALESCE(a.median_re_taxes, 0) AS tax,
+               -- The neighborhood score rides along with the money math. Without
+               -- this join the scanner ranked purely on yield and could put a
+               -- bottom-decile tract at the top with no hint of it -- the two
+               -- halves of the product never spoke to each other.
+               sc.score, sc.moran_cluster, sc.data_completeness
         FROM tract_geom t
         JOIN LATERAL (
             SELECT median_home_value, median_gross_rent, median_re_taxes
             FROM acs_tract x WHERE x.geoid = t.geoid ORDER BY x.vintage DESC LIMIT 1
         ) a ON true
         LEFT JOIN county_geom c ON c.county_fips = t.state_fips || t.county_fips
+        LEFT JOIN tract_scores sc ON sc.geoid = t.geoid
         WHERE t.vintage = 2020
           -- Floor, not just > 0: tracts with too few owner-occupied units for
           -- a real median (Census suppression/small-sample artifacts) report
@@ -545,6 +569,7 @@ def deal_scan():
     ),
     final AS (
         SELECT geoid, name, state_fips, county_name, intptlat, intptlon,
+               score, moran_cluster, data_completeness,
                price, rent_per_unit, tax, gpr, egi, noi,
                (noi/price)*100 AS cap_rate,
                down_here, loan, monthly_pi, monthly_pi*12 AS annual_debt_service,
