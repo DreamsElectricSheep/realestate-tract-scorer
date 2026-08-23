@@ -35,8 +35,37 @@ logging.basicConfig(
 log = logging.getLogger("dashboard")
 
 app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
+# debug=False (below) disables Jinja's auto-reload by default, which silently
+# serves a stale compiled template after an index.html edit until the service
+# is restarted -- bit us once already. This is a single-user LAN dashboard,
+# so the tiny per-request recompile cost is irrelevant; correctness on edit
+# is worth more than it.
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 GEOCODER = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
+
+# Owner's home base (Hamden, CT) -- not a target market (property taxes too
+# high there), used only as the anchor point for the "how far would I have to
+# drive" filter. Town-center coordinates, precise enough for a mileage filter.
+HOME_BASE = (41.3959, -72.8968)
+
+
+def distance_filter_sql(alias: str = "t") -> tuple[str, list]:
+    """
+    Returns (sql_fragment, params) for an optional max-miles-from-home-base
+    filter, or ("", []) if not requested. Uses geography distance (meters),
+    converted to miles, against the tract's Census-published internal point.
+    """
+    max_miles = request.args.get("max_miles", type=float)
+    if not max_miles or max_miles <= 0:
+        return "", []
+    return (
+        f" AND ST_Distance("
+        f"ST_SetSRID(ST_MakePoint({alias}.intptlon,{alias}.intptlat),4326)::geography, "
+        f"ST_SetSRID(ST_MakePoint(%s,%s),4326)::geography"
+        f") / 1609.34 <= %s",
+        [HOME_BASE[1], HOME_BASE[0], max_miles],
+    )
 
 
 # ------------------------------------------------------------------ helpers
@@ -128,9 +157,13 @@ def lookup():
 def tract_detail(geoid: str) -> dict:
     out: dict = {"geoid": geoid}
 
-    geo = q("""SELECT geoid, name, state_fips, county_fips, aland, awater,
-                      intptlat, intptlon
-               FROM tract_geom WHERE geoid = %s AND vintage = 2020""", (geoid,))
+    geo = q("""SELECT t.geoid, t.name, t.state_fips, t.county_fips, t.aland, t.awater,
+                      t.intptlat, t.intptlon, c.name AS county_name,
+                      ST_XMin(t.geom) AS bbox_west, ST_XMax(t.geom) AS bbox_east,
+                      ST_YMin(t.geom) AS bbox_south, ST_YMax(t.geom) AS bbox_north
+               FROM tract_geom t
+               LEFT JOIN county_geom c ON c.county_fips = t.state_fips || t.county_fips
+               WHERE t.geoid = %s AND t.vintage = 2020""", (geoid,))
     out["geography"] = geo[0] if geo else None
 
     # ACS across every vintage we hold — this is the temporal spine.
@@ -238,11 +271,24 @@ def counties_geojson():
     if not table_populated("county_geom"):
         return jsonify({"type": "FeatureCollection", "features": [],
                         "note": "county_geom not built yet"})
-    rows = q("""
+    max_miles = request.args.get("max_miles", type=float)
+    state = request.args.get("state")
+    clauses, params = [], []
+    if state:
+        # county_fips is the 5-digit national FIPS (2-digit state + 3-digit
+        # county); no separate state column on this table.
+        clauses.append("left(county_fips,2) = %s")
+        params.append(state)
+    if max_miles and max_miles > 0:
+        clauses.append("ST_Distance(ST_Centroid(geom_simple)::geography, "
+                        "ST_SetSRID(ST_MakePoint(%s,%s),4326)::geography) / 1609.34 <= %s")
+        params.extend([HOME_BASE[1], HOME_BASE[0], max_miles])
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    rows = q(f"""
         SELECT county_fips, name, ST_AsGeoJSON(geom_simple) AS gj,
                score, tract_count, scored_tracts
-        FROM county_geom ORDER BY county_fips
-    """)
+        FROM county_geom{where} ORDER BY county_fips
+    """, tuple(params))
     feats = []
     for r in rows:
         feats.append({
@@ -258,6 +304,45 @@ def counties_geojson():
     return jsonify({"type": "FeatureCollection", "features": feats, "metric": metric})
 
 
+def apply_common_filters(where: str, params: list, alias: str = "t") -> tuple[str, list]:
+    """Shared filter set for /api/tracts.geojson and /api/top: state, score
+    range, Moran cluster, and distance from home base. Kept in one place so
+    the map and the leaderboard can never silently drift apart on what
+    "filtered" means -- state was previously only wired into /api/top, so
+    picking a state correctly filtered the leaderboard but left the map
+    showing neighboring-state tracts inside the same viewport (e.g. Long
+    Island tracts still rendering with a Connecticut filter applied)."""
+    state = request.args.get("state")
+    if state:
+        where += f" AND {alias}.state_fips = %s"
+        params.append(state)
+    max_home_value = request.args.get("max_home_value", type=float)
+    if max_home_value:
+        # Requires the caller's query to LEFT JOIN LATERAL the latest-vintage
+        # ACS row as `latest_acs` (see tracts_geojson/top_tracts) -- tract-level
+        # median home value, the only home-price signal this free tier has.
+        where += " AND latest_acs.median_home_value IS NOT NULL AND latest_acs.median_home_value <= %s"
+        params.append(max_home_value)
+    min_score = request.args.get("min_score", type=float)
+    if min_score is not None:
+        where += " AND s.score >= %s"
+        params.append(min_score)
+    max_score = request.args.get("max_score", type=float)
+    if max_score is not None:
+        where += " AND s.score <= %s"
+        params.append(max_score)
+    clusters = request.args.get("cluster")  # comma-separated: HH,LH,...
+    if clusters:
+        vals = [c.strip().upper() for c in clusters.split(",") if c.strip()]
+        if vals:
+            where += f" AND s.moran_cluster = ANY(%s)"
+            params.append(vals)
+    dist_sql, dist_params = distance_filter_sql(alias)
+    where += dist_sql
+    params.extend(dist_params)
+    return where, params
+
+
 @app.route("/api/tracts.geojson")
 def tracts_geojson():
     """Zoomed view. Strictly bbox-limited and capped — never ship 84k polygons."""
@@ -270,29 +355,44 @@ def tracts_geojson():
         return jsonify({"type": "FeatureCollection", "features": [],
                         "note": "zoom in further"})
 
-    rows = q("""
-        SELECT t.geoid, t.name,
+    where = "WHERE t.vintage = 2020 AND t.geom && ST_MakeEnvelope(%s,%s,%s,%s,4326)"
+    params: list = [w, s, e, n]
+    where, params = apply_common_filters(where, params)
+
+    rows = q(f"""
+        SELECT t.geoid, t.name, c.name AS county_name,
                ST_AsGeoJSON(ST_SimplifyPreserveTopology(t.geom, 0.0002)) AS gj,
                s.score, s.moran_cluster, s.is_opportunity_zone,
-               s.rent_income_spread, s.data_completeness
+               s.rent_income_spread, s.data_completeness,
+               latest_acs.median_home_value, latest_acs.median_gross_rent,
+               ST_Distance(
+                 ST_SetSRID(ST_MakePoint(t.intptlon,t.intptlat),4326)::geography,
+                 ST_SetSRID(ST_MakePoint(%s,%s),4326)::geography) / 1609.34 AS distance_mi
         FROM tract_geom t
         LEFT JOIN tract_scores s ON s.geoid = t.geoid
-        WHERE t.vintage = 2020
-          AND t.geom && ST_MakeEnvelope(%s,%s,%s,%s,4326)
+        LEFT JOIN county_geom c ON c.county_fips = t.state_fips || t.county_fips
+        LEFT JOIN LATERAL (
+            SELECT median_home_value, median_gross_rent FROM acs_tract a
+            WHERE a.geoid = t.geoid ORDER BY a.vintage DESC LIMIT 1
+        ) latest_acs ON true
+        {where}
         LIMIT 4000
-    """, (w, s, e, n))
+    """, tuple([HOME_BASE[1], HOME_BASE[0]] + params))
 
     import json as _json
     feats = [{
         "type": "Feature",
         "geometry": _json.loads(r["gj"]),
         "properties": {
-            "geoid": r["geoid"], "name": r["name"],
+            "geoid": r["geoid"], "name": r["name"], "county_name": r["county_name"],
             "score": float(r["score"]) if r["score"] is not None else None,
             "moran_cluster": r["moran_cluster"],
             "is_oz": r["is_opportunity_zone"],
             "spread": float(r["rent_income_spread"]) if r["rent_income_spread"] is not None else None,
             "completeness": float(r["data_completeness"]) if r["data_completeness"] is not None else None,
+            "distance_mi": round(float(r["distance_mi"]), 1) if r["distance_mi"] is not None else None,
+            "median_home_value": r["median_home_value"],
+            "median_gross_rent": r["median_gross_rent"],
         },
     } for r in rows]
     return jsonify({"type": "FeatureCollection", "features": feats})
@@ -302,24 +402,177 @@ def tracts_geojson():
 def top_tracts():
     """Ranked leaderboard — the actionable output."""
     limit = min(int(request.args.get("limit", 100)), 500)
-    state = request.args.get("state")
     where = "WHERE s.data_completeness >= 0.6"
     params: list = []
-    if state:
-        where += " AND t.state_fips = %s"
-        params.append(state)
+    where, params = apply_common_filters(where, params)
     params.append(limit)
     rows = q(f"""
-        SELECT s.geoid, t.name, t.state_fips, t.county_fips, s.score,
+        SELECT s.geoid, t.name, t.state_fips, t.county_fips, c.name AS county_name, s.score,
                s.moran_cluster, s.is_opportunity_zone, s.rent_income_spread,
-               t.intptlat, t.intptlon
+               t.intptlat, t.intptlon,
+               latest_acs.median_home_value, latest_acs.median_gross_rent,
+               ST_Distance(
+                 ST_SetSRID(ST_MakePoint(t.intptlon,t.intptlat),4326)::geography,
+                 ST_SetSRID(ST_MakePoint(%s,%s),4326)::geography) / 1609.34 AS distance_mi
         FROM tract_scores s
         JOIN tract_geom t ON t.geoid = s.geoid AND t.vintage = 2020
+        LEFT JOIN county_geom c ON c.county_fips = t.state_fips || t.county_fips
+        LEFT JOIN LATERAL (
+            SELECT median_home_value, median_gross_rent FROM acs_tract a
+            WHERE a.geoid = t.geoid ORDER BY a.vintage DESC LIMIT 1
+        ) latest_acs ON true
         {where}
         ORDER BY s.score DESC NULLS LAST
         LIMIT %s
-    """, tuple(params))
+    """, tuple([HOME_BASE[1], HOME_BASE[0]] + params))
+    for r in rows:
+        if r.get("distance_mi") is not None:
+            r["distance_mi"] = round(float(r["distance_mi"]), 1)
     return jsonify({"count": len(rows), "tracts": rows})
+
+
+@app.route("/api/scan")
+def deal_scan():
+    """
+    Nationwide inversion of the single-property deal calculator: instead of
+    typing in one listing's numbers, run the same cap-rate/cash-flow math
+    against every tract's own ACS median home value and median gross rent,
+    using the caller's actual financing plan (fixed down payment $ + max
+    loan $), and rank by cash-on-cash return.
+
+    Same approximation the single-property calculator uses, applied at
+    scale: "price" and "rent" are the tract's median SINGLE-unit values,
+    scaled by an assumed unit count -- a nationwide screen to prioritize
+    where to look, not a substitute for real listing data. Property tax
+    is the tract's own actual median tax bill (exact, since price ==
+    that tract's own median_home_value by construction -- no ratio
+    scaling needed, unlike the single-calculator's arbitrary-price case).
+    Insurance has no free per-tract data source, so it's a flat estimate
+    applied uniformly everywhere -- real insurance cost varies enormously
+    by geography (coastal/flood-zone markets run far higher), which is
+    exactly the kind of thing that would flip a "profitable" result at
+    this screening stage. Treat this as a first pass, not a final answer.
+    """
+    down_payment = request.args.get("down_payment", type=float)
+    max_loan = request.args.get("max_loan", type=float)
+    if not down_payment or down_payment <= 0 or max_loan is None or max_loan < 0:
+        return jsonify({"error": "down_payment (>0) and max_loan (>=0) are required"}), 400
+
+    rate = request.args.get("rate", default=7.0, type=float)
+    term_years = request.args.get("term", default=30, type=int)
+    units = request.args.get("units", default=1, type=float)
+    vacancy = request.args.get("vacancy", default=7.0, type=float)
+    opex = request.args.get("opex", default=40.0, type=float)
+    insurance = request.args.get("insurance", default=1500.0, type=float)
+    state = request.args.get("state")
+    limit = min(int(request.args.get("limit", 100)), 300)
+    max_miles = request.args.get("max_miles", type=float)
+
+    max_price = down_payment + max_loan
+
+    extra_where = ""
+    params: dict = {
+        "max_price": max_price, "units": units, "vacancy": vacancy, "opex": opex,
+        "insurance": insurance, "down_payment": down_payment, "rate": rate,
+        "term_months": term_years * 12, "limit": limit,
+    }
+    if state:
+        extra_where += " AND t.state_fips = %(state)s"
+        params["state"] = state
+    if max_miles and max_miles > 0:
+        extra_where += (" AND ST_Distance(ST_SetSRID(ST_MakePoint(t.intptlon,t.intptlat),4326)::geography,"
+                         " ST_SetSRID(ST_MakePoint(%(home_lon)s,%(home_lat)s),4326)::geography) / 1609.34"
+                         " <= %(max_miles)s")
+        params["home_lon"], params["home_lat"], params["max_miles"] = HOME_BASE[1], HOME_BASE[0], max_miles
+
+    sql = f"""
+    WITH base AS (
+        SELECT t.geoid, t.name, t.state_fips, c.name AS county_name,
+               t.intptlat, t.intptlon,
+               a.median_home_value AS price, a.median_gross_rent AS rent_per_unit,
+               COALESCE(a.median_re_taxes, 0) AS tax
+        FROM tract_geom t
+        JOIN LATERAL (
+            SELECT median_home_value, median_gross_rent, median_re_taxes
+            FROM acs_tract x WHERE x.geoid = t.geoid ORDER BY x.vintage DESC LIMIT 1
+        ) a ON true
+        LEFT JOIN county_geom c ON c.county_fips = t.state_fips || t.county_fips
+        WHERE t.vintage = 2020
+          -- Floor, not just > 0: tracts with too few owner-occupied units for
+          -- a real median (Census suppression/small-sample artifacts) report
+          -- absurd values like $9,999 in Manhattan. Those aren't real deals --
+          -- unfiltered, their mechanically enormous cash-on-cash ratios would
+          -- dominate the top of every ranking.
+          AND a.median_home_value >= 50000 AND a.median_home_value <= %(max_price)s
+          -- 3501 is ACS's top-code sentinel for this field ("$3,500 or more"),
+          -- not a real value -- confirmed 2026-08-22, 1,130 tracts report
+          -- exactly 3501 vs. 17 for the next most common nearby value. Paired
+          -- with a low home value it produces impossible rent-to-price ratios.
+          AND a.median_gross_rent > 0 AND a.median_gross_rent < 3501
+          -- Direct gross-yield ceiling, not just the downstream cap-rate one
+          -- below: real markets essentially never sustain an annual gross
+          -- rent-to-price ratio above roughly a fifth of the price (the
+          -- classic "monthly rent equals one point of the price" heuristic
+          -- is already considered an aggressive cash-flow market, and that
+          -- is well under this ceiling). Above it is the owner/renter
+          -- housing-stock mismatch described in deal_scan()'s docstring, not
+          -- a real buyable combination -- confirmed against a real,
+          -- well-sampled tract (563 owner-occupied units) whose ratio was
+          -- roughly double this ceiling before the filter existed.
+          AND a.median_gross_rent * 12 <= a.median_home_value * 0.21
+          {extra_where}
+    ),
+    econ AS (
+        SELECT *,
+               (rent_per_unit * %(units)s * 12)::numeric AS gpr,
+               (rent_per_unit * %(units)s * 12 * (1 - %(vacancy)s/100.0))::numeric AS egi,
+               LEAST(price, %(down_payment)s) AS down_here,
+               GREATEST(price - %(down_payment)s, 0) AS loan
+        FROM base
+    ),
+    noi_calc AS (
+        SELECT *, (egi - egi*%(opex)s/100.0 - tax - %(insurance)s) AS noi
+        FROM econ
+    ),
+    finance AS (
+        SELECT *,
+               CASE WHEN loan <= 0 THEN 0
+                    WHEN %(rate)s = 0 THEN loan / %(term_months)s
+                    ELSE loan * ((%(rate)s/1200.0) * power(1+%(rate)s/1200.0, %(term_months)s))
+                              / (power(1+%(rate)s/1200.0, %(term_months)s) - 1)
+               END AS monthly_pi
+        FROM noi_calc
+    ),
+    final AS (
+        SELECT geoid, name, state_fips, county_name, intptlat, intptlon,
+               price, rent_per_unit, tax, gpr, egi, noi,
+               (noi/price)*100 AS cap_rate,
+               down_here, loan, monthly_pi, monthly_pi*12 AS annual_debt_service,
+               (noi - monthly_pi*12) AS annual_cash_flow,
+               CASE WHEN down_here > 0 THEN ((noi - monthly_pi*12)/down_here)*100 END AS cash_on_cash,
+               CASE WHEN monthly_pi*12 > 0 THEN noi/(monthly_pi*12) END AS dscr
+        FROM finance
+    )
+    -- Defense-in-depth: real-world multifamily cap rates run roughly 4 to 8
+    -- points (mid-7 in the riskiest sub-sectors per current market data);
+    -- anything above 25 almost certainly means a data artifact slipped past
+    -- the home-value/rent floors above, not a genuine once-in-a-lifetime deal.
+    SELECT * FROM final
+    WHERE cap_rate <= 25
+    ORDER BY cash_on_cash DESC NULLS LAST
+    LIMIT %(limit)s
+    """
+    rows = q(sql, params)
+    for r in rows:
+        for k, v in list(r.items()):
+            if isinstance(v, float):
+                r[k] = round(v, 2)
+    return jsonify({
+        "count": len(rows), "max_price": max_price,
+        "assumptions": {"rate": rate, "term_years": term_years, "units": units,
+                         "vacancy_pct": vacancy, "opex_pct": opex, "insurance": insurance},
+        "tracts": rows,
+    })
 
 
 if __name__ == "__main__":

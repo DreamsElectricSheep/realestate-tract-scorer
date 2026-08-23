@@ -46,13 +46,32 @@ logging.basicConfig(
 )
 log = logging.getLogger("score_tracts")
 
-# Provisional weights (sum to 100). Phase 3 replaces these with fitted values.
+# Calibrated 2026-08-22 (sum to 100). Backtest: predictor from ACS 2017->2019
+# (crosswalked 2010->2020 boundaries) vs realized outcomes 2019->2023/2025
+# (ACS-native + FHFA CBSA-inherited HPI). See scripts/calibrate.py and the
+# calibration_report table for the full run (Spearman IC per component,
+# decile lift). Raw finding: s_rent_momentum and s_spatial both had NEGATIVE
+# IC against realized appreciation over this window -- tracts that looked
+# "hot" by the classic dense/walkable/fast-rent-growth pattern underperformed,
+# while quieter, less-dense tracts outperformed. s_supply_risk and
+# s_affordability behaved as designed (positive IC, consistent sign).
+#
+# This window (2019-2025) straddles COVID-era remote-work migration, so the
+# raw fitted values were NOT applied mechanically -- see the negative-IC
+# caveat above and the discussion in CLAUDE_MEMORY.md. Applied instead: a
+# hand-blended adjustment per the owner's judgment that the shift away from
+# dense-urban-core preference is likely durable (remote work isn't reverting)
+# but that walkability/transit proximity still matters even to remote
+# workers, so s_spatial got a light trim, not a hard cut. s_rent_momentum
+# dropped more since that's where the backtest evidence was strongest and
+# most consistent. s_supply_risk -- the cleanest, most consistent signal in
+# the backtest -- got the largest increase.
 WEIGHTS = {
-    "s_rent_momentum": 30,     # rent CAGR minus income CAGR spread
-    "s_spatial": 20,           # POI proximity (universities/transit/industrial/etc)
-    "s_supply_risk": 15,       # inverted: heavy multifamily permitting = penalty
-    "s_affordability": 10,     # moderate burden = room to grow; extreme = risk
-    "s_education_influx": 10,  # change in bachelor's-or-higher share
+    "s_rent_momentum": 22,     # rent CAGR minus income CAGR spread (was 30; backtest: negative IC)
+    "s_spatial": 18,           # POI proximity (was 20; light trim only -- still a real signal)
+    "s_supply_risk": 22,       # inverted: heavy multifamily permitting = penalty (was 15; cleanest signal)
+    "s_affordability": 12,     # moderate burden = room to grow; extreme = risk (was 10)
+    "s_education_influx": 11,  # change in bachelor's-or-higher share (was 10; inconclusive backtest)
     "s_safety": 10,            # neutral (50) until crime_agency is populated
     "s_regulatory": 5,         # neutral (50) until reg_flags is populated
 }

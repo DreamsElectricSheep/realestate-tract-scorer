@@ -7,60 +7,177 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
   :root{
-    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
-    --tx:#e6e9ef; --tx2:#9aa3b2; --accent:#4ea1ff; --good:#3ddc97; --warn:#ffb020; --bad:#ff5c5c;
+    --page:#0d0d0d; --surface-1:#151514; --surface-2:#1c1c1b; --surface-3:#242423;
+    --line:#2c2c2a; --ring:rgba(255,255,255,.10);
+    --tx:#ffffff; --tx2:#c3c2b7; --tx3:#898781;
+    --accent:#3987e5; --accent-wash:#132234;
+    --good:#0ca30c; --good-wash:#0d2210;
+    --warning:#fab219; --warning-wash:#2a2008;
+    --critical:#d03b3b; --critical-wash:#2a1414;
   }
   *{box-sizing:border-box}
   body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-       background:var(--bg);color:var(--tx)}
-  header{padding:12px 18px;background:var(--panel);border-bottom:1px solid var(--line);
+       background:var(--page);color:var(--tx);-webkit-font-smoothing:antialiased}
+  header{padding:14px 20px;background:var(--surface-1);border-bottom:1px solid var(--line);
          display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-  h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.2px}
-  h1 span{color:var(--tx2);font-weight:400}
+  h1{font-size:16px;margin:0;font-weight:700;letter-spacing:-.1px}
+  h1 span{color:var(--tx3);font-weight:400}
   .layers{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
-  .chip{font-size:11px;padding:3px 9px;border-radius:99px;border:1px solid var(--line);
-        background:var(--panel2);color:var(--tx2)}
-  .chip.on{color:var(--good);border-color:#20503c;background:#12241c}
-  .chip.off{color:var(--tx2);opacity:.65}
-  .wrap{display:grid;grid-template-columns:400px 1fr;height:calc(100vh - 53px)}
+  .chip{font-size:11px;padding:4px 10px;border-radius:99px;border:1px solid var(--line);
+        background:var(--surface-2);color:var(--tx3);font-weight:500}
+  .chip.on{color:var(--good);border-color:rgba(12,163,12,.35);background:var(--good-wash)}
+  .chip.off{color:var(--tx3);opacity:.6}
+  .wrap{display:grid;grid-template-columns:400px 1fr;height:calc(100vh - 57px)}
   @media (max-width:900px){.wrap{grid-template-columns:1fr;height:auto}#map{height:60vh}}
-  aside{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;padding:16px}
+  aside{background:var(--surface-1);border-right:1px solid var(--line);overflow-y:auto;padding:16px}
   #map{width:100%;height:100%;background:#0b0d11}
-  .search{display:flex;gap:8px;margin-bottom:14px}
-  input[type=text]{flex:1;padding:10px 12px;border-radius:8px;border:1px solid var(--line);
-        background:var(--panel2);color:var(--tx);font-size:13px}
-  input[type=text]:focus{outline:none;border-color:var(--accent)}
-  button{padding:10px 16px;border-radius:8px;border:0;background:var(--accent);color:#06121f;
-        font-weight:600;cursor:pointer;font-size:13px}
+
+  input[type=text],input[type=number],select{width:100%;padding:11px 12px;border-radius:10px;
+        border:1px solid var(--line);background:var(--surface-2);color:var(--tx);font-size:13px;
+        font-family:inherit;transition:border-color .12s}
+  input[type=text]:focus,input[type=number]:focus,select:focus{outline:none;border-color:var(--accent)}
+  input::placeholder{color:var(--tx3)}
+  select{-webkit-appearance:none;appearance:none;
+        background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="%23898781" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>');
+        background-repeat:no-repeat;background-position:right 10px center}
+
+  button{padding:11px 18px;border-radius:10px;border:0;background:var(--accent);color:#fff;
+        font-weight:600;cursor:pointer;font-size:13px;font-family:inherit;transition:filter .12s,transform .05s}
+  button:hover{filter:brightness(1.1)}
+  button:active{transform:scale(.98)}
   button:disabled{opacity:.5;cursor:default}
-  .banner{padding:10px 12px;border-radius:8px;background:#2a1f0a;border:1px solid #4d3a11;
-        color:var(--warn);font-size:12px;margin-bottom:14px;line-height:1.45}
-  .card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
-        padding:14px;margin-bottom:12px}
-  .card h3{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;
-        color:var(--tx2);font-weight:600}
-  .kv{display:flex;justify-content:space-between;gap:12px;padding:4px 0;
-        border-bottom:1px solid rgba(255,255,255,.04);font-size:13px}
+  button.ghost{background:var(--surface-2);color:var(--tx2);border:1px solid var(--line);font-weight:500}
+  button.ghost:hover{background:var(--surface-3);filter:none}
+  button.block{width:100%}
+
+  .search{display:flex;gap:8px;margin-bottom:14px}
+  .search input{flex:1}
+  .search button{flex-shrink:0}
+
+  .card{background:var(--surface-2);border:1px solid var(--line);border-radius:14px;
+        padding:16px;margin-bottom:12px}
+  .card h3{margin:0 0 12px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;
+        color:var(--tx3);font-weight:700}
+  .fgroup{margin-bottom:16px}
+  .fgroup:last-child{margin-bottom:0}
+  .fgroup>label{display:block;font-size:12px;color:var(--tx2);margin-bottom:7px;font-weight:600}
+
+  .qpicks{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+  .qpick{font-size:12px;padding:6px 12px;border-radius:8px;border:1px solid var(--line);
+        background:var(--surface-1);color:var(--tx2);cursor:pointer;font-weight:600;user-select:none}
+  .qpick:hover{border-color:var(--tx3)}
+  .qpick.active{color:var(--accent);border-color:var(--accent);background:var(--accent-wash)}
+  .frow{display:flex;gap:8px;align-items:center}
+  .frow input[type=number]{width:0;flex:1;text-align:center}
+
+  /* cluster picker — icon + label cards, no more two-letter codes */
+  .clusters{display:flex;flex-direction:column;gap:6px}
+  .clustercard{display:flex;align-items:center;gap:11px;padding:10px 11px;border-radius:10px;
+        border:1px solid var(--line);background:var(--surface-1);cursor:pointer;user-select:none;
+        transition:border-color .12s,background .12s}
+  .clustercard:hover{border-color:var(--tx3)}
+  .clustercard .cicon{width:30px;height:30px;border-radius:8px;flex-shrink:0;
+        display:flex;align-items:center;justify-content:center;color:var(--tx3);
+        background:var(--surface-3)}
+  .clustercard .cicon svg{width:16px;height:16px}
+  .clustercard .ctext{flex:1;min-width:0}
+  .clustercard .ctitle{font-size:12.5px;font-weight:700;color:var(--tx)}
+  .clustercard .cdesc{font-size:11px;color:var(--tx3);margin-top:1px}
+  .clustercard .ccheck{width:18px;height:18px;border-radius:6px;border:1.5px solid var(--line);
+        flex-shrink:0;display:flex;align-items:center;justify-content:center}
+  .clustercard .ccheck svg{width:12px;height:12px;opacity:0;stroke:#fff}
+  .clustercard[data-active="true"]{background:var(--surface-3)}
+  .clustercard[data-active="true"] .ccheck svg{opacity:1}
+  /* per-cluster accent, applied only when that card is active */
+  .clustercard[data-tone="good"][data-active="true"]{border-color:rgba(12,163,12,.4)}
+  .clustercard[data-tone="good"][data-active="true"] .cicon{background:var(--good-wash);color:var(--good)}
+  .clustercard[data-tone="good"][data-active="true"] .ccheck{background:var(--good);border-color:var(--good)}
+  .clustercard[data-tone="accent"][data-active="true"]{border-color:rgba(57,135,229,.4)}
+  .clustercard[data-tone="accent"][data-active="true"] .cicon{background:var(--accent-wash);color:var(--accent)}
+  .clustercard[data-tone="accent"][data-active="true"] .ccheck{background:var(--accent);border-color:var(--accent)}
+  .clustercard[data-tone="warning"][data-active="true"]{border-color:rgba(250,178,25,.4)}
+  .clustercard[data-tone="warning"][data-active="true"] .cicon{background:var(--warning-wash);color:var(--warning)}
+  .clustercard[data-tone="warning"][data-active="true"] .ccheck{background:var(--warning);border-color:var(--warning)}
+  .clustercard[data-tone="muted"][data-active="true"] .ccheck{background:var(--tx3);border-color:var(--tx3)}
+
+  .switchrow{display:flex;align-items:center;gap:10px}
+  .switch{width:38px;height:22px;border-radius:99px;background:var(--surface-3);
+        border:1px solid var(--line);position:relative;cursor:pointer;flex-shrink:0;transition:background .15s}
+  .switch::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
+        background:var(--tx3);transition:transform .15s,background .15s}
+  .switch[data-on="true"]{background:var(--accent-wash);border-color:var(--accent)}
+  .switch[data-on="true"]::after{transform:translateX(16px);background:var(--accent)}
+  .distinputs{display:flex;align-items:center;gap:8px;margin-top:10px}
+  .distinputs input{width:70px;flex:none;text-align:center}
+  .distinputs span{font-size:12px;color:var(--tx3)}
+
+  .resultitem{display:flex;align-items:center;gap:10px;padding:10px 4px;border-radius:8px;
+        border-bottom:1px solid var(--line);cursor:pointer}
+  .resultitem:last-child{border-bottom:0}
+  .resultitem:hover{background:var(--surface-3)}
+  .resultitem .rdot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .resultitem .rmain{flex:1;min-width:0}
+  .resultitem .rname{font-size:12.5px;font-weight:600;color:var(--tx);white-space:nowrap;
+        overflow:hidden;text-overflow:ellipsis}
+  .resultitem .rmeta{font-size:11px;color:var(--tx3);margin-top:1px}
+  .resultitem .rscore{font-variant-numeric:tabular-nums;font-weight:800;font-size:14px;color:var(--tx);flex-shrink:0}
+  .resultitem .rrank{width:20px;flex-shrink:0;font-size:12px;font-weight:700;color:var(--tx3);
+        font-variant-numeric:tabular-nums}
+
+  .tabs{display:flex;gap:4px;background:var(--surface-2);border:1px solid var(--line);
+        border-radius:12px;padding:4px;margin-bottom:14px}
+  .tabbtn{flex:1;text-align:center;padding:9px 10px;border-radius:9px;font-size:13px;
+        font-weight:600;color:var(--tx3);cursor:pointer;user-select:none;transition:background .12s,color .12s}
+  .tabbtn:hover{color:var(--tx2)}
+  .tabbtn.active{background:var(--surface-3);color:var(--tx)}
+
+  .banner{padding:11px 13px;border-radius:10px;background:var(--warning-wash);
+        border:1px solid rgba(250,178,25,.3);color:var(--warning);font-size:12px;
+        margin-bottom:14px;line-height:1.45}
+
+  .kv{display:flex;justify-content:space-between;gap:12px;padding:5px 0;
+        border-bottom:1px solid var(--line);font-size:13px}
   .kv:last-child{border-bottom:0}
-  .kv .k{color:var(--tx2)}
-  .kv .v{font-variant-numeric:tabular-nums;text-align:right}
-  .big{font-size:32px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
-  .muted{color:var(--tx2)}
-  .pos{color:var(--good)} .neg{color:var(--bad)} .mid{color:var(--warn)}
-  .pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;
-        background:#12241c;color:var(--good);border:1px solid #20503c;margin-left:6px}
-  .legend{position:absolute;bottom:22px;right:12px;z-index:600;background:rgba(23,26,33,.94);
-        border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:11px}
+  .kv .k{color:var(--tx3)}
+  .kv .v{font-variant-numeric:tabular-nums;text-align:right;font-weight:600}
+  .hero{font-size:44px;font-weight:800;line-height:1;letter-spacing:-1px}
+  .muted{color:var(--tx3)}
+  .pos{color:var(--good)} .neg{color:var(--critical)} .mid{color:var(--warning)}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:4px 10px;
+        border-radius:99px;background:var(--good-wash);color:var(--good);
+        border:1px solid rgba(12,163,12,.35);margin-left:8px;font-weight:700}
+  .zillowlink{display:flex;align-items:center;justify-content:center;gap:8px;
+        margin-top:12px;padding:11px 14px;border-radius:10px;background:#0d6efd14;
+        border:1px solid #0d6efd40;color:#4ea1ff;font-weight:700;font-size:13px;
+        text-decoration:none}
+  .zillowlink:hover{background:#0d6efd22}
+  .zillowlink svg{width:14px;height:14px;flex-shrink:0}
+  .clusterbadge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;
+        padding:5px 10px;border-radius:99px;margin-top:8px;font-weight:600}
+
+  .legend{position:absolute;bottom:22px;right:12px;z-index:600;background:rgba(21,21,20,.95);
+        border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:11px}
   .legend .row{display:flex;align-items:center;gap:7px;margin:3px 0}
-  .sw{width:15px;height:11px;border-radius:2px;display:inline-block}
-  .hint{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:600;
-        background:rgba(23,26,33,.94);border:1px solid var(--line);border-radius:8px;
-        padding:7px 14px;font-size:12px;color:var(--tx2)}
+  .sw{width:15px;height:11px;border-radius:3px;display:inline-block}
+  .hint{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:600;
+        background:rgba(21,21,20,.95);border:1px solid var(--line);border-radius:10px;
+        padding:8px 15px;font-size:12px;color:var(--tx2)}
   .maprel{position:relative;height:100%}
-  .err{color:var(--bad);font-size:13px}
+  .err{color:var(--critical);font-size:13px}
   table{width:100%;border-collapse:collapse;font-size:12px}
-  td{padding:3px 0;border-bottom:1px solid rgba(255,255,255,.04)}
-  td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+  td{padding:5px 0;border-bottom:1px solid var(--line)}
+  td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+
+  .whylede{font-size:13px;color:var(--tx2);margin-bottom:14px;line-height:1.5}
+  .whyrow{margin-bottom:13px}
+  .whyrow:last-child{margin-bottom:0}
+  .whytop{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
+  .whylabel{font-size:12.5px;font-weight:600;color:var(--tx)}
+  .whyval{font-size:12px;font-weight:700;color:var(--tx2);font-variant-numeric:tabular-nums}
+  .whybar{height:6px;border-radius:99px;background:var(--surface-3);overflow:hidden}
+  .whyfill{height:100%;border-radius:99px;background:var(--accent)}
+  .whydesc{font-size:11px;color:var(--tx3);margin-top:4px}
+  .locname{font-size:14px;font-weight:600;color:var(--tx2);margin-bottom:2px}
 </style>
 </head>
 <body>
@@ -88,6 +205,291 @@
     </div>
     {% endif %}
 
+    <div class="tabs">
+      <div class="tabbtn active" data-tab="filters">Filters</div>
+      <div class="tabbtn" data-tab="top50">Top 50</div>
+      <div class="tabbtn" data-tab="calc">Deal calculator</div>
+      <div class="tabbtn" data-tab="scan">Deal scanner</div>
+    </div>
+
+    <div id="tab-scan" style="display:none">
+      <div class="card">
+        <h3>Nationwide deal scanner</h3>
+        <div class="muted" style="font-size:12px;margin-bottom:14px;line-height:1.5">
+          Runs the same math as the calculator across every U.S. census tract's
+          own median home value &amp; rent, ranked by best cash-on-cash return
+          for <b>your</b> actual down payment and loan size. This is a
+          screening tool to prioritize where to dig deeper — not real listings,
+          and not investment advice. <b>Read this:</b> price and rent come from
+          two different groups of homes in the same tract (owners vs. renters),
+          which can genuinely diverge — a mobile-home-park tract next to a
+          normal apartment complex can show an oddly high implied yield that
+          isn't a real, buyable combination. Treat surprising results as a
+          lead to verify on the ground, not a confirmed deal.
+        </div>
+
+        <div class="fgroup">
+          <label>Down payment you have available</label>
+          <input type="number" id="s-down" placeholder="e.g. 60000">
+        </div>
+        <div class="fgroup">
+          <label>Max mortgage you're willing to take</label>
+          <input type="number" id="s-loan" placeholder="e.g. 240000">
+          <div class="muted" style="font-size:11px;margin-top:4px" id="s-budget-hint"></div>
+        </div>
+        <div class="fgroup">
+          <label>Assumed units per property</label>
+          <input type="number" id="s-units" value="1" min="1">
+        </div>
+        <div class="fgroup">
+          <label>Mortgage rate (annual)</label>
+          <div class="frow">
+            <input type="number" id="s-rate" value="7.0" step="0.1" min="0">
+            <span class="muted" style="font-size:12px">%</span>
+          </div>
+        </div>
+        <div class="fgroup">
+          <label>Loan term</label>
+          <div class="frow">
+            <input type="number" id="s-term" value="30" min="1">
+            <span class="muted" style="font-size:12px">years</span>
+          </div>
+        </div>
+        <div class="fgroup">
+          <label>Vacancy &amp; credit loss</label>
+          <div class="frow">
+            <input type="number" id="s-vacancy" value="7" min="0" max="100">
+            <span class="muted" style="font-size:12px">%</span>
+          </div>
+        </div>
+        <div class="fgroup">
+          <label>Operating expenses (% of effective income)</label>
+          <div class="frow">
+            <input type="number" id="s-opex" value="40" min="0" max="100">
+            <span class="muted" style="font-size:12px">%</span>
+          </div>
+        </div>
+        <div class="fgroup">
+          <label>Assumed annual insurance (flat, applied everywhere — no per-area data source)</label>
+          <input type="number" id="s-ins" value="1500" min="0">
+        </div>
+        <div class="fgroup">
+          <label>State (optional)</label>
+          <select id="s-state"><option value="">All states</option></select>
+        </div>
+        <div class="switchrow">
+          <div class="switch" id="s-dist-on" data-on="false"></div>
+          <span style="font-size:12.5px;color:var(--tx2)">Only within driving range of Hamden, CT</span>
+        </div>
+        <div class="distinputs">
+          <input type="number" id="s-dist-mi" value="100" min="1">
+          <span>miles</span>
+        </div>
+
+        <button class="block" id="s-scan" style="margin-top:14px">Scan nationwide</button>
+      </div>
+      <div id="scan-results"></div>
+    </div>
+
+    <div id="tab-top50" style="display:none">
+      <div id="top50-list"><div class="card muted">Loading…</div></div>
+    </div>
+
+    <div id="tab-calc" style="display:none">
+      <div class="card">
+        <h3>Deal calculator</h3>
+        <div class="muted" style="font-size:12px;margin-bottom:14px;line-height:1.5">
+          Type in the numbers from a listing (Zillow or otherwise) plus your financing
+          plan. This is a calculator, not investment advice — check every default
+          before trusting the output.
+        </div>
+
+        <div class="fgroup">
+          <label>Property address (optional — auto-fills a rent &amp; tax estimate)</label>
+          <div class="frow">
+            <input type="text" id="c-addr" placeholder="123 Main St, City, ST">
+            <button class="ghost" id="c-lookup" style="flex-shrink:0">Look up</button>
+          </div>
+          <div id="c-lookup-status" class="muted" style="font-size:11px;margin-top:6px"></div>
+        </div>
+
+        <div class="fgroup">
+          <label>Purchase price</label>
+          <input type="number" id="c-price" placeholder="e.g. 275000">
+        </div>
+        <div class="fgroup">
+          <label>Number of units</label>
+          <input type="number" id="c-units" value="2" min="1">
+        </div>
+        <div class="fgroup">
+          <label>Estimated monthly rent PER UNIT</label>
+          <input type="number" id="c-rent" placeholder="auto-fills from address lookup">
+          <div class="muted" style="font-size:11px;margin-top:4px">Tract-wide ACS average when auto-filled — override with the listing's stated rent if it has one.</div>
+        </div>
+
+        <div class="fgroup">
+          <label>Down payment</label>
+          <div class="frow">
+            <input type="number" id="c-down-pct" value="25" min="0" max="100">
+            <span class="muted" style="font-size:12px">%</span>
+          </div>
+        </div>
+        <div class="fgroup">
+          <label>Mortgage rate (annual)</label>
+          <div class="frow">
+            <input type="number" id="c-rate" value="7.0" step="0.1" min="0">
+            <span class="muted" style="font-size:12px">%</span>
+          </div>
+        </div>
+        <div class="fgroup">
+          <label>Loan term</label>
+          <div class="frow">
+            <input type="number" id="c-term" value="30" min="1">
+            <span class="muted" style="font-size:12px">years</span>
+          </div>
+        </div>
+
+        <div class="fgroup">
+          <label>Vacancy &amp; credit loss</label>
+          <div class="frow">
+            <input type="number" id="c-vacancy" value="7" min="0" max="100">
+            <span class="muted" style="font-size:12px">%</span>
+          </div>
+        </div>
+        <div class="fgroup">
+          <label>Operating expenses (% of effective income — repairs, management, etc.)</label>
+          <div class="frow">
+            <input type="number" id="c-opex" value="40" min="0" max="100">
+            <span class="muted" style="font-size:12px">%</span>
+          </div>
+        </div>
+        <div class="fgroup">
+          <label>Annual property tax</label>
+          <input type="number" id="c-tax" placeholder="auto-fills from address lookup">
+        </div>
+        <div class="fgroup">
+          <label>Annual insurance</label>
+          <input type="number" id="c-ins" placeholder="e.g. 2400 — no free data source for this, estimate or get a quote">
+        </div>
+
+        <button class="block" id="c-compute" style="margin-top:4px">Calculate</button>
+      </div>
+
+      <div id="c-results"></div>
+    </div>
+
+    <div id="tab-filters">
+    <div class="card">
+      <h3>Filters</h3>
+
+      <div class="fgroup">
+        <label>State</label>
+        <select id="f-state"><option value="">All states</option></select>
+      </div>
+
+      <div class="fgroup">
+        <label>Minimum score</label>
+        <div class="qpicks" id="f-quickscore">
+          <span class="qpick active" data-v="">Any</span>
+          <span class="qpick" data-v="50">50+</span>
+          <span class="qpick" data-v="65">65+</span>
+          <span class="qpick" data-v="80">80+</span>
+        </div>
+        <div class="frow">
+          <input type="number" id="f-min" min="0" max="100" placeholder="min">
+          <span class="muted">–</span>
+          <input type="number" id="f-max" min="0" max="100" placeholder="max">
+        </div>
+      </div>
+
+      <div class="fgroup">
+        <label>Max home value</label>
+        <div class="qpicks" id="f-quickvalue">
+          <span class="qpick active" data-v="">Any</span>
+          <span class="qpick" data-v="200000">$200k</span>
+          <span class="qpick" data-v="300000">$300k</span>
+          <span class="qpick" data-v="400000">$400k</span>
+        </div>
+        <input type="number" id="f-max-value" placeholder="custom $ amount">
+      </div>
+
+      <div class="fgroup">
+        <label>Market pattern</label>
+        <div class="clusters" id="f-clusters">
+          <div class="clustercard" data-v="HH" data-tone="good">
+            <div class="cicon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+            </div>
+            <div class="ctext">
+              <div class="ctitle">Momentum zone</div>
+              <div class="cdesc">Strong tract in a strong neighborhood</div>
+            </div>
+            <div class="ccheck"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+          </div>
+          <div class="clustercard" data-v="LH" data-tone="accent">
+            <div class="cicon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 18 3 22 9 12 22 2 9 6 3"></polygon><line x1="2" y1="9" x2="22" y2="9"></line><line x1="12" y1="22" x2="12" y2="9"></line></svg>
+            </div>
+            <div class="ctext">
+              <div class="ctitle">Hidden value</div>
+              <div class="cdesc">Lagging tract inside a hot neighborhood</div>
+            </div>
+            <div class="ccheck"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+          </div>
+          <div class="clustercard" data-v="HL" data-tone="warning">
+            <div class="cicon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            </div>
+            <div class="ctext">
+              <div class="ctitle">Isolated spike</div>
+              <div class="cdesc">Strong tract, weaker neighbors — worth a closer look</div>
+            </div>
+            <div class="ccheck"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+          </div>
+          <div class="clustercard" data-v="LL" data-tone="muted">
+            <div class="cicon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"></polyline><polyline points="17 18 23 18 23 12"></polyline></svg>
+            </div>
+            <div class="ctext">
+              <div class="ctitle">Quiet market</div>
+              <div class="cdesc">Cold tract in a cold neighborhood</div>
+            </div>
+            <div class="ccheck"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+          </div>
+          <div class="clustercard" data-v="NS" data-tone="muted">
+            <div class="cicon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </div>
+            <div class="ctext">
+              <div class="ctitle">No clear pattern</div>
+              <div class="cdesc">Not enough of a trend to call either way</div>
+            </div>
+            <div class="ccheck"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="fgroup">
+        <label>Distance from home base</label>
+        <div class="switchrow">
+          <div class="switch" id="f-dist-on" data-on="false"></div>
+          <span style="font-size:12.5px;color:var(--tx2)">Only show tracts within driving range</span>
+        </div>
+        <div class="distinputs">
+          <input type="number" id="f-dist-mi" value="100" min="1">
+          <span>miles of Hamden, CT</span>
+        </div>
+      </div>
+
+      <div class="frow" style="margin-top:4px">
+        <button id="f-apply" class="block">Apply filters</button>
+        <button class="ghost" id="f-clear">Clear</button>
+      </div>
+    </div>
+
+    <div id="results"></div>
+    </div><!-- /#tab-filters -->
+
     <div id="out"><div class="card muted">Enter an address, or click any tract on the map.</div></div>
   </aside>
 
@@ -95,7 +497,7 @@
     <div id="map"></div>
     <div class="hint" id="hint">Zoom in past county level to see individual tracts</div>
     <div class="legend">
-      <div style="color:var(--tx2);margin-bottom:5px">Investment score</div>
+      <div style="color:var(--tx3);margin-bottom:6px;font-weight:600">Investment score</div>
       <div class="row"><span class="sw" style="background:#fcffa4"></span> 80–100 hot</div>
       <div class="row"><span class="sw" style="background:#fca50a"></span> 60–80</div>
       <div class="row"><span class="sw" style="background:#dd513a"></span> 40–60</div>
@@ -109,8 +511,21 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const map = L.map('map', {preferCanvas:true}).setView([39.5,-98.35], 4);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+const DEFAULT_VIEW=[[39.5,-98.35],4];
+
+// Base tiles WITHOUT labels, choropleth fill in the middle, then a dedicated
+// labels-only overlay on a custom high-z pane on top of everything -- a
+// plain second tile layer would still render under the choropleth (Leaflet
+// puts all tile layers in tilePane, below overlayPane where GeoJSON lives),
+// which was the actual cause of city/town names being unreadable.
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
   {maxZoom:18, attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+
+map.createPane('labels');
+map.getPane('labels').style.zIndex = 450;   // above overlayPane (400), below markers/popups
+map.getPane('labels').style.pointerEvents = 'none';
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png',
+  {maxZoom:18, pane:'labels'}).addTo(map);
 
 // Magma ramp: perceptually uniform and colorblind-safe, and still reads as heat.
 function color(v){
@@ -123,15 +538,384 @@ function style(f){
           fillOpacity:s===null||s===undefined?0.18:0.72};
 }
 
+// Cluster metadata shared between the filter cards and result-list dots/badges.
+const CLUSTERS={
+  HH:{label:'Momentum zone', color:'#0ca30c'},
+  LH:{label:'Hidden value',  color:'#3987e5'},
+  HL:{label:'Isolated spike',color:'#fab219'},
+  LL:{label:'Quiet market',  color:'#898781'},
+  NS:{label:'No clear pattern',color:'#898781'},
+};
+
 let countyLayer=null, tractLayer=null, marker=null;
 
-fetch('/api/counties.geojson').then(r=>r.json()).then(g=>{
-  if(!g.features.length) return;
-  countyLayer=L.geoJSON(g,{style, onEachFeature:(f,l)=>{
-    const p=f.properties;
-    l.bindTooltip(`<b>${p.name||p.county_fips}</b><br>score ${p.score??'—'} · ${p.scored_tracts??0}/${p.tract_count??0} tracts scored`);
-  }}).addTo(map);
+// ---------------------------------------------------------------- filters
+const STATES=[["01","AL"],["02","AK"],["04","AZ"],["05","AR"],["06","CA"],["08","CO"],
+  ["09","CT"],["10","DE"],["11","DC"],["12","FL"],["13","GA"],["15","HI"],["16","ID"],
+  ["17","IL"],["18","IN"],["19","IA"],["20","KS"],["21","KY"],["22","LA"],["23","ME"],
+  ["24","MD"],["25","MA"],["26","MI"],["27","MN"],["28","MS"],["29","MO"],["30","MT"],
+  ["31","NE"],["32","NV"],["33","NH"],["34","NJ"],["35","NM"],["36","NY"],["37","NC"],
+  ["38","ND"],["39","OH"],["40","OK"],["41","OR"],["42","PA"],["44","RI"],["45","SC"],
+  ["46","SD"],["47","TN"],["48","TX"],["49","UT"],["50","VT"],["51","VA"],["53","WA"],
+  ["54","WV"],["55","WI"],["56","WY"]];
+const stateSel=document.getElementById('f-state');
+STATES.forEach(([fips,ab])=>{const o=document.createElement('option');o.value=fips;o.textContent=ab;stateSel.appendChild(o);});
+const STATE_AB=Object.fromEntries(STATES);
+
+// ---------------------------------------------------------------- tabs
+document.querySelectorAll('.tabbtn').forEach(btn=>{
+  btn.onclick=()=>{
+    document.querySelectorAll('.tabbtn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    const tab=btn.dataset.tab;
+    document.getElementById('tab-filters').style.display = tab==='filters' ? '' : 'none';
+    document.getElementById('tab-top50').style.display = tab==='top50' ? '' : 'none';
+    document.getElementById('tab-calc').style.display = tab==='calc' ? '' : 'none';
+    document.getElementById('tab-scan').style.display = tab==='scan' ? '' : 'none';
+    if(tab==='top50') loadTop50();
+  };
 });
+
+const scanStateSel=document.getElementById('s-state');
+STATES.forEach(([fips,ab])=>{const o=document.createElement('option');o.value=fips;o.textContent=ab;scanStateSel.appendChild(o);});
+const scanDistSwitch=document.getElementById('s-dist-on');
+scanDistSwitch.addEventListener('click',()=>{scanDistSwitch.dataset.on = scanDistSwitch.dataset.on==='true'?'false':'true';});
+
+function updateBudgetHint(){
+  const d=parseFloat(document.getElementById('s-down').value)||0;
+  const l=parseFloat(document.getElementById('s-loan').value)||0;
+  document.getElementById('s-budget-hint').textContent = (d||l) ?
+    `Max purchase price scanned: ${fmtUSD(d+l)}` : '';
+}
+document.getElementById('s-down').addEventListener('input',updateBudgetHint);
+document.getElementById('s-loan').addEventListener('input',updateBudgetHint);
+
+document.getElementById('s-scan').onclick=()=>{
+  const down=parseFloat(document.getElementById('s-down').value);
+  const loan=parseFloat(document.getElementById('s-loan').value);
+  const box=document.getElementById('scan-results');
+  if(!down || down<=0 || loan==null || isNaN(loan) || loan<0){
+    box.innerHTML='<div class="card err">Down payment (&gt;0) and max mortgage (&gt;=0) are both required.</div>';
+    return;
+  }
+  const p=new URLSearchParams();
+  p.set('down_payment',down); p.set('max_loan',loan);
+  p.set('units',document.getElementById('s-units').value||1);
+  p.set('rate',document.getElementById('s-rate').value||7);
+  p.set('term',document.getElementById('s-term').value||30);
+  p.set('vacancy',document.getElementById('s-vacancy').value||7);
+  p.set('opex',document.getElementById('s-opex').value||40);
+  p.set('insurance',document.getElementById('s-ins').value||0);
+  p.set('limit',75);
+  const st=scanStateSel.value; if(st) p.set('state',st);
+  if(scanDistSwitch.dataset.on==='true'){
+    const mi=document.getElementById('s-dist-mi').value;
+    if(mi) p.set('max_miles',mi);
+  }
+
+  box.innerHTML='<div class="card muted">Scanning ~85,000 tracts…</div>';
+  fetch('/api/scan?'+p.toString()).then(r=>r.json().then(j=>({ok:r.ok,j})))
+    .then(({ok,j})=>{
+      if(!ok){ box.innerHTML=`<div class="card err">${j.error||'Scan failed.'}</div>`; return; }
+      if(!j.tracts.length){
+        box.innerHTML='<div class="card muted">No tracts matched — try a higher budget or loosen the state/distance filter.</div>';
+        return;
+      }
+      let h=`<div class="card"><h3>${j.count} matches under ${fmtUSD(j.max_price)}</h3>`;
+      j.tracts.forEach(t=>{
+        const price=Number(t.price), rent=Number(t.rent_per_unit);
+        const rentToPrice=(rent*12/price*100);
+        const cfClass=Number(t.annual_cash_flow)>0?'pos':'neg';
+        h+=`<div class="resultitem" data-lat="${t.intptlat}" data-lon="${t.intptlon}" data-geoid="${t.geoid}" style="align-items:flex-start">
+          <div class="rmain">
+            <div class="rname">${t.county_name||t.name||t.geoid}</div>
+            <div class="rmeta">${fmtUSD(price)} · ${fmtUSD(rent)}/mo/unit · annual rent is ${rentToPrice.toFixed(1)}% of price</div>
+            <div class="rmeta">Cap ${fmtPct(Number(t.cap_rate))} · Cash flow <span class="${cfClass}">${fmtUSD(t.annual_cash_flow)}/yr</span> · CoC ${t.cash_on_cash!=null?fmtPct(Number(t.cash_on_cash)):'—'}${t.dscr!=null?' · DSCR '+Number(t.dscr).toFixed(2):''}</div>
+          </div>
+        </div>`;
+      });
+      h+='</div>';
+      box.innerHTML=h;
+      box.querySelectorAll('.resultitem').forEach(el=>{
+        el.onclick=()=>{
+          map.setView([+el.dataset.lat,+el.dataset.lon],13);
+          showTract(el.dataset.geoid);
+        };
+      });
+      const pts=j.tracts.filter(t=>t.intptlat!=null&&t.intptlon!=null);
+      if(pts.length>1){
+        map.fitBounds(L.latLngBounds(pts.map(t=>[t.intptlat,t.intptlon])),{padding:[40,40],maxZoom:11});
+      } else if(pts.length===1){
+        map.setView([pts[0].intptlat,pts[0].intptlon],11);
+      }
+    })
+    .catch(()=>{ box.innerHTML='<div class="card err">Scan failed.</div>'; });
+};
+
+// ---------------------------------------------------------------- deal calculator
+document.getElementById('c-lookup').onclick=()=>{
+  const addr=document.getElementById('c-addr').value.trim();
+  const status=document.getElementById('c-lookup-status');
+  if(!addr){ status.textContent='Enter an address first.'; return; }
+  status.textContent='Looking up…';
+  fetch('/api/lookup?address='+encodeURIComponent(addr)).then(r=>r.json().then(j=>({ok:r.ok,j})))
+    .then(({ok,j})=>{
+      if(!ok){ status.textContent=j.error||'Lookup failed.'; return; }
+      const a=j.tract && j.tract.acs_latest;
+      if(!a){ status.textContent='Matched, but no ACS data for this tract yet.'; return; }
+      const rentInput=document.getElementById('c-rent');
+      const taxInput=document.getElementById('c-tax');
+      if(a.median_gross_rent && !rentInput.value) rentInput.value=a.median_gross_rent;
+      const priceVal=parseFloat(document.getElementById('c-price').value);
+      if(a.median_re_taxes && a.median_home_value && !taxInput.value){
+        // Scale the tract's typical tax bill by the ratio of THIS purchase
+        // price to the tract's typical home value, rather than pasting the
+        // tract average in verbatim -- a $150k fixer in a $400k-median tract
+        // is not carrying that tract's average tax bill.
+        const effRate=a.median_re_taxes/a.median_home_value;
+        const base=priceVal||a.median_home_value;
+        taxInput.value=Math.round(base*effRate);
+      }
+      status.textContent=`Matched: ${j.matched_address}. Rent & tax estimates filled in from ACS ${a.vintage} data for this tract — review before trusting them.`;
+    })
+    .catch(()=>{ status.textContent='Lookup failed.'; });
+};
+
+function fmtUSD(v){ return v==null||isNaN(v)?'—':'$'+Math.round(v).toLocaleString(); }
+function fmtPct(v){ return v==null||isNaN(v)?'—':v.toFixed(2)+'%'; }
+
+document.getElementById('c-compute').onclick=()=>{
+  const price=parseFloat(document.getElementById('c-price').value);
+  const units=parseFloat(document.getElementById('c-units').value)||1;
+  const rentPerUnit=parseFloat(document.getElementById('c-rent').value);
+  const downPct=parseFloat(document.getElementById('c-down-pct').value)||0;
+  const ratePct=parseFloat(document.getElementById('c-rate').value)||0;
+  const termYrs=parseFloat(document.getElementById('c-term').value)||30;
+  const vacancyPct=parseFloat(document.getElementById('c-vacancy').value)||0;
+  const opexPct=parseFloat(document.getElementById('c-opex').value)||0;
+  const tax=parseFloat(document.getElementById('c-tax').value)||0;
+  const ins=parseFloat(document.getElementById('c-ins').value)||0;
+
+  const box=document.getElementById('c-results');
+  if(!price || !rentPerUnit){
+    box.innerHTML='<div class="card err">Purchase price and estimated rent per unit are both required.</div>';
+    return;
+  }
+
+  const gpr=rentPerUnit*units*12;                        // gross potential rent, annual
+  const egi=gpr*(1-vacancyPct/100);                       // effective gross income
+  const opex=egi*(opexPct/100);
+  const noi=egi-opex-tax-ins;
+  const capRate=(noi/price)*100;
+
+  const downDollar=price*(downPct/100);
+  const loanAmount=price-downDollar;
+  const monthlyRate=(ratePct/100)/12;
+  const nPayments=termYrs*12;
+  const monthlyPI = monthlyRate===0 ? loanAmount/nPayments :
+    loanAmount * (monthlyRate*Math.pow(1+monthlyRate,nPayments)) / (Math.pow(1+monthlyRate,nPayments)-1);
+  const annualDebtService=monthlyPI*12;
+
+  const annualCashFlow=noi-annualDebtService;
+  const monthlyCashFlow=annualCashFlow/12;
+  const cashOnCash=downDollar>0 ? (annualCashFlow/downDollar)*100 : null;
+  const dscr=annualDebtService>0 ? noi/annualDebtService : null;
+
+  const cfClass=annualCashFlow>0?'pos':annualCashFlow<0?'neg':'';
+  const dscrClass=dscr==null?'':dscr>=1.25?'pos':dscr>=1?'mid':'neg';
+
+  box.innerHTML=`
+    <div class="card">
+      <h3>Yield</h3>
+      <div class="kv"><span class="k">Gross potential rent (annual)</span><span class="v">${fmtUSD(gpr)}</span></div>
+      <div class="kv"><span class="k">Effective gross income</span><span class="v">${fmtUSD(egi)}</span></div>
+      <div class="kv"><span class="k">Operating expenses</span><span class="v">${fmtUSD(opex)}</span></div>
+      <div class="kv"><span class="k">Property tax</span><span class="v">${fmtUSD(tax)}</span></div>
+      <div class="kv"><span class="k">Insurance</span><span class="v">${fmtUSD(ins)}</span></div>
+      <div class="kv"><span class="k"><b>Net operating income</b></span><span class="v"><b>${fmtUSD(noi)}</b></span></div>
+      <div class="kv"><span class="k"><b>Cap rate</b></span><span class="v"><b>${fmtPct(capRate)}</b></span></div>
+    </div>
+    <div class="card">
+      <h3>Financing</h3>
+      <div class="kv"><span class="k">Down payment</span><span class="v">${fmtUSD(downDollar)}</span></div>
+      <div class="kv"><span class="k">Loan amount</span><span class="v">${fmtUSD(loanAmount)}</span></div>
+      <div class="kv"><span class="k">Monthly principal &amp; interest</span><span class="v">${fmtUSD(monthlyPI)}</span></div>
+      <div class="kv"><span class="k">Annual debt service</span><span class="v">${fmtUSD(annualDebtService)}</span></div>
+    </div>
+    <div class="card">
+      <h3>Return</h3>
+      <div class="kv"><span class="k">Monthly cash flow</span><span class="v ${cfClass}">${fmtUSD(monthlyCashFlow)}</span></div>
+      <div class="kv"><span class="k"><b>Annual cash flow</b></span><span class="v ${cfClass}"><b>${fmtUSD(annualCashFlow)}</b></span></div>
+      <div class="kv"><span class="k"><b>Cash-on-cash return</b></span><span class="v ${cfClass}"><b>${cashOnCash==null?'—':fmtPct(cashOnCash)}</b></span></div>
+      <div class="kv"><span class="k">DSCR</span><span class="v ${dscrClass}">${dscr==null?'—':dscr.toFixed(2)}</span></div>
+      <div class="muted" style="font-size:11px;margin-top:10px">DSCR below 1.0 means the property's own income doesn't cover the mortgage — most lenders want at least 1.20-1.25.</div>
+    </div>`;
+  box.scrollIntoView({behavior:'smooth', block:'start'});
+};
+
+function loadTop50(){
+  const box=document.getElementById('top50-list');
+  box.innerHTML='<div class="card muted">Loading…</div>';
+  fetch('/api/top?limit=50').then(r=>r.json()).then(d=>{
+    if(!d.tracts || !d.tracts.length){
+      box.innerHTML='<div class="card muted">No scored tracts yet — the scorer hasn\'t run.</div>';
+      return;
+    }
+    let h='<div class="card"><h3>Best-scoring tracts, nationwide, unfiltered</h3>';
+    d.tracts.forEach((t,i)=>{
+      const cl=CLUSTERS[t.moran_cluster];
+      h+=`<div class="resultitem" data-lat="${t.intptlat}" data-lon="${t.intptlon}" data-geoid="${t.geoid}">
+        <span class="rrank">${i+1}</span>
+        <span class="rdot" style="background:${cl?cl.color:'#3a3f4b'}"></span>
+        <div class="rmain">
+          <div class="rname">${t.county_name||t.name||t.geoid}</div>
+          <div class="rmeta">${STATE_AB[t.state_fips]||t.state_fips||''}${cl?' · '+cl.label:''}</div>
+        </div>
+        <span class="rscore">${fmt(t.score,1)}</span></div>`;
+    });
+    h+='</div>';
+    box.innerHTML=h;
+    box.querySelectorAll('.resultitem').forEach(el=>{
+      el.onclick=()=>{
+        map.setView([+el.dataset.lat,+el.dataset.lon],13);
+        showTract(el.dataset.geoid);
+      };
+    });
+    const pts=d.tracts.filter(t=>t.intptlat!=null&&t.intptlon!=null);
+    if(pts.length){
+      const bounds=L.latLngBounds(pts.map(t=>[t.intptlat,t.intptlon]));
+      map.fitBounds(bounds,{padding:[40,40]});
+    }
+  });
+}
+
+let activeClusters=new Set();
+document.getElementById('f-clusters').addEventListener('click',e=>{
+  const card=e.target.closest('.clustercard'); if(!card) return;
+  const v=card.dataset.v;
+  const nowActive=card.dataset.active!=='true';
+  card.dataset.active=nowActive?'true':'false';
+  if(nowActive) activeClusters.add(v); else activeClusters.delete(v);
+});
+
+document.getElementById('f-quickscore').addEventListener('click',e=>{
+  const q=e.target.closest('.qpick'); if(!q) return;
+  document.querySelectorAll('#f-quickscore .qpick').forEach(el=>el.classList.remove('active'));
+  q.classList.add('active');
+  document.getElementById('f-min').value=q.dataset.v;
+});
+
+document.getElementById('f-quickvalue').addEventListener('click',e=>{
+  const q=e.target.closest('.qpick'); if(!q) return;
+  document.querySelectorAll('#f-quickvalue .qpick').forEach(el=>el.classList.remove('active'));
+  q.classList.add('active');
+  document.getElementById('f-max-value').value=q.dataset.v;
+});
+document.getElementById('f-max-value').addEventListener('input',()=>{
+  document.querySelectorAll('#f-quickvalue .qpick').forEach(el=>el.classList.remove('active'));
+});
+
+const distSwitch=document.getElementById('f-dist-on');
+distSwitch.addEventListener('click',()=>{
+  distSwitch.dataset.on = distSwitch.dataset.on==='true'?'false':'true';
+});
+
+function filterQS(){
+  const p=new URLSearchParams();
+  const state=stateSel.value; if(state) p.set('state',state);
+  const min=document.getElementById('f-min').value; if(min!=='') p.set('min_score',min);
+  const max=document.getElementById('f-max').value; if(max!=='') p.set('max_score',max);
+  const maxValue=document.getElementById('f-max-value').value; if(maxValue!=='') p.set('max_home_value',maxValue);
+  if(activeClusters.size) p.set('cluster',[...activeClusters].join(','));
+  if(distSwitch.dataset.on==='true'){
+    const mi=document.getElementById('f-dist-mi').value;
+    if(mi) p.set('max_miles',mi);
+  }
+  return p.toString();
+}
+function filtersActive(){ return filterQS().length>0; }
+
+function applyFilters(){
+  loadCounties();
+  loadTracts();
+  loadResults();
+}
+document.getElementById('f-apply').onclick=applyFilters;
+document.getElementById('f-clear').onclick=()=>{
+  stateSel.value='';
+  document.getElementById('f-min').value='';
+  document.getElementById('f-max').value='';
+  document.querySelectorAll('#f-quickscore .qpick').forEach(el=>el.classList.remove('active'));
+  document.querySelector('#f-quickscore .qpick[data-v=""]').classList.add('active');
+  document.getElementById('f-max-value').value='';
+  document.querySelectorAll('#f-quickvalue .qpick').forEach(el=>el.classList.remove('active'));
+  document.querySelector('#f-quickvalue .qpick[data-v=""]').classList.add('active');
+  distSwitch.dataset.on='false';
+  activeClusters.clear();
+  document.querySelectorAll('#f-clusters .clustercard').forEach(c=>c.dataset.active='false');
+  applyFilters();
+  map.setView(DEFAULT_VIEW[0], DEFAULT_VIEW[1]);
+};
+
+// ---------------------------------------------------------------- results list
+function loadResults(){
+  const qs=filterQS();
+  const box=document.getElementById('results');
+  if(!qs){box.innerHTML='';return;}
+  fetch('/api/top?limit=50&'+qs).then(r=>r.json()).then(d=>{
+    if(!d.tracts || !d.tracts.length){
+      box.innerHTML='<div class="card muted">No tracts match these filters.</div>';
+      return;
+    }
+    let h=`<div class="card"><h3>Matches (${d.count})</h3>`;
+    d.tracts.forEach(t=>{
+      const cl=CLUSTERS[t.moran_cluster];
+      h+=`<div class="resultitem" data-lat="${t.intptlat}" data-lon="${t.intptlon}" data-geoid="${t.geoid}">
+        <span class="rdot" style="background:${cl?cl.color:'#3a3f4b'}"></span>
+        <div class="rmain">
+          <div class="rname">${t.county_name||t.name||t.geoid}</div>
+          <div class="rmeta">${t.median_home_value?money(t.median_home_value)+' · ':''}${cl?cl.label:'—'}${t.distance_mi!=null?' · '+t.distance_mi+' mi':''}</div>
+        </div>
+        <span class="rscore">${fmt(t.score,1)}</span></div>`;
+    });
+    h+='</div>';
+    box.innerHTML=h;
+    box.querySelectorAll('.resultitem').forEach(el=>{
+      el.onclick=()=>{
+        map.setView([+el.dataset.lat,+el.dataset.lon],13);
+        showTract(el.dataset.geoid);
+      };
+    });
+
+    // Snap the map to where the filtered matches actually are, instead of
+    // leaving the viewport wherever it happened to be -- a state filter
+    // should visibly jump to that state, not just quietly change what's
+    // colored on a map still centered on the whole country.
+    const pts=d.tracts.filter(t=>t.intptlat!=null&&t.intptlon!=null);
+    if(pts.length===1){
+      map.setView([pts[0].intptlat,pts[0].intptlon],11);
+    } else if(pts.length>1){
+      const bounds=L.latLngBounds(pts.map(t=>[t.intptlat,t.intptlon]));
+      map.fitBounds(bounds,{padding:[40,40],maxZoom:11});
+    }
+  });
+}
+
+// ---------------------------------------------------------------- map layers
+function loadCounties(){
+  const qs=filterQS();
+  fetch('/api/counties.geojson'+(qs?'?'+qs:'')).then(r=>r.json()).then(g=>{
+    if(countyLayer) map.removeLayer(countyLayer);
+    if(!g.features.length) return;
+    countyLayer=L.geoJSON(g,{style, onEachFeature:(f,l)=>{
+      const p=f.properties;
+      l.bindTooltip(`<b>${p.name||p.county_fips}</b><br>score ${p.score??'—'} · ${p.scored_tracts??0}/${p.tract_count??0} tracts scored<br><span class="muted">click to zoom in</span>`);
+      l.on('click',()=>map.fitBounds(l.getBounds()));
+    }});
+    if(map.getZoom()<9) countyLayer.addTo(map);
+  });
+}
+loadCounties();
 
 function loadTracts(){
   const z=map.getZoom();
@@ -146,16 +930,73 @@ function loadTracts(){
   if(countyLayer && map.hasLayer(countyLayer)) map.removeLayer(countyLayer);
   const b=map.getBounds();
   const bbox=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()].join(',');
-  fetch('/api/tracts.geojson?bbox='+bbox).then(r=>r.json()).then(g=>{
+  const qs=filterQS();
+  fetch('/api/tracts.geojson?bbox='+bbox+(qs?'&'+qs:'')).then(r=>r.json()).then(g=>{
     if(tractLayer) map.removeLayer(tractLayer);
     tractLayer=L.geoJSON(g,{style, onEachFeature:(f,l)=>{
       const p=f.properties;
-      l.bindTooltip(`<b>${p.name||p.geoid}</b><br>score ${p.score??'—'}${p.is_oz?' · OZ':''}`);
-      l.on('click',()=>showTract(p.geoid));
+      const cl=CLUSTERS[p.moran_cluster];
+      const title=p.county_name ? `${p.county_name} <span class="muted" style="font-weight:400">· ${p.name||p.geoid}</span>` : (p.name||p.geoid);
+      l.bindTooltip(`<b>${title}</b><br>score ${p.score??'—'}${p.is_oz?' · OZ':''}${cl?' · '+cl.label:''}${p.distance_mi!=null?' · '+p.distance_mi+' mi away':''}<br><span class="muted">click for full detail</span>`);
+      // Zoom in on the clicked tract itself (capped at 14 -- past that,
+      // CARTO's label tiles show individual streets/neighborhoods, which is
+      // the "what cities/towns am I actually looking at" context the county
+      // click alone doesn't give you.
+      l.on('click',()=>{map.fitBounds(l.getBounds(),{maxZoom:14});showTract(p.geoid);});
     }}).addTo(map);
   });
 }
 map.on('moveend', loadTracts);
+
+// Mirrors WEIGHTS in scripts/score_tracts.py -- keep these in sync if the
+// scorer is recalibrated. Plain-English labels are what turn "s_rent_momentum:
+// 71" into an actual answer to "why is this area scored the way it is."
+const SCORE_COMPONENTS=[
+  {key:'s_rent_momentum',    label:'Rent growth vs. income growth', weight:22,
+   desc:"How much faster rent is rising here than local incomes -- the core \"getting hot\" signal."},
+  {key:'s_spatial',          label:'Walkability & transit access',  weight:18,
+   desc:'Proximity to universities, transit, hospitals, and other amenities.'},
+  {key:'s_supply_risk',      label:'New construction risk',         weight:22,
+   desc:'Higher is better here -- it means fewer new apartments are being built nearby to compete with.'},
+  {key:'s_affordability',    label:'Room for rent to grow',         weight:12,
+   desc:"Rent is high enough to matter but hasn't already maxed out what renters can pay."},
+  {key:'s_education_influx', label:'Education influx',              weight:11,
+   desc:'Growth in college-educated residents moving into the area.'},
+];
+
+// Deep-links straight into Zillow's map search, zoomed to the tract's own
+// bounding box, rather than a generic city-wide search -- this is the same
+// searchQueryState shape Zillow's own site produces when you pan/zoom the
+// map yourself, so it's a stable (if unofficial) way to land on "homes for
+// sale right here" with no API key needed.
+function zillowUrl(west, south, east, north){
+  const state={
+    mapBounds:{west, east, south, north},
+    isMapVisible:true, isListVisible:true,
+    filterState:{sortSelection:{value:'globalrelevanceex'}},
+  };
+  return 'https://www.zillow.com/homes/for_sale/?searchQueryState='+encodeURIComponent(JSON.stringify(state));
+}
+
+function whyCard(s){
+  const known=SCORE_COMPONENTS.filter(c=>s[c.key]!=null);
+  let lede='';
+  if(known.length){
+    const top=[...known].sort((a,b)=>(b.weight*s[b.key])-(a.weight*s[a.key])).slice(0,2);
+    lede=`<div class="whylede">Driven mainly by <b>${top.map(c=>c.label.toLowerCase()).join('</b> and <b>')}</b>.</div>`;
+  }
+  let h=`<div class="card"><h3>Why this score</h3>${lede}`;
+  SCORE_COMPONENTS.forEach(c=>{
+    const v=s[c.key];
+    const p=v==null?0:Math.max(0,Math.min(100,Math.round(v)));
+    h+=`<div class="whyrow">
+      <div class="whytop"><span class="whylabel">${c.label}</span><span class="whyval">${v==null?'no data':p+'/100'}</span></div>
+      <div class="whybar"><div class="whyfill" style="width:${p}%"></div></div>
+      <div class="whydesc">${c.desc}</div></div>`;
+  });
+  h+=`<div class="muted" style="font-size:11px;margin-top:12px">Safety and local-regulation signals aren't available nationwide yet, so they're held neutral rather than guessed at.</div></div>`;
+  return h;
+}
 
 const fmt=(v,d=0)=>v===null||v===undefined?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:d});
 const money=v=>v===null||v===undefined?'—':'$'+Number(v).toLocaleString();
@@ -166,24 +1007,43 @@ function render(d, matched){
   const t=d.tract||d, g=t.geography, a=t.acs_latest, tr=t.trends, s=t.score;
   let h='';
 
+  const locName=g ? `${g.county_name||'Unknown county'}, ${STATE_AB[g.state_fips]||g.state_fips}` : null;
+
   if(matched) h+=`<div class="card"><h3>Matched address</h3><div>${matched}</div>
-    <div class="muted" style="font-size:12px;margin-top:4px">Tract ${t.geoid}</div></div>`;
+    <div class="muted" style="font-size:12px;margin-top:4px">${locName||''}</div></div>`;
 
   h+=`<div class="card"><h3>Investment score</h3>`;
+  if(locName) h+=`<div class="locname">${locName}</div>`;
   if(s){
-    h+=`<div class="big">${fmt(s.score,1)}<span class="muted" style="font-size:15px">/100</span>
-        ${s.is_opportunity_zone?'<span class="pill">Opportunity Zone</span>':''}</div>
-        <div class="muted" style="font-size:12px;margin-top:6px">
-        cluster ${s.moran_cluster||'—'} · completeness ${fmt(s.data_completeness*100,0)}%</div>`;
+    const cl=CLUSTERS[s.moran_cluster];
+    h+=`<div class="hero">${fmt(s.score,1)}<span class="muted" style="font-size:16px;font-weight:600">/100</span>
+        ${s.is_opportunity_zone?'<span class="pill">Opportunity Zone</span>':''}</div>`;
+    if(cl){
+      h+=`<div class="clusterbadge" style="background:${cl.color}22;color:${cl.color}">
+        <span style="width:7px;height:7px;border-radius:50%;background:${cl.color}"></span>${cl.label}</div>`;
+    }
+    h+=`<div class="muted" style="font-size:12px;margin-top:8px">
+        data completeness ${fmt(s.data_completeness*100,0)}%</div>`;
   } else {
-    h+=`<div class="muted">Not scored yet — scorer has not run for this tract.</div>`;
+    h+=`<div class="muted">Not scored yet — scorer has not run for this area.</div>`;
+  }
+  if(g && g.bbox_west!=null){
+    const zurl=zillowUrl(g.bbox_west, g.bbox_south, g.bbox_east, g.bbox_north);
+    h+=`<a class="zillowlink" href="${zurl}" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-6"></path><polyline points="9 22 9 12 15 12 15 22"></polyline><path d="M2 10l10-8 10 8"></path></svg>
+      See homes for sale here on Zillow
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;margin-left:-2px"><path d="M7 17L17 7M17 7H9M17 7v8"></path></svg>
+    </a>`;
   }
   h+=`</div>`;
 
-  if(g) h+=`<div class="card"><h3>Geography</h3>
-    <div class="kv"><span class="k">Tract</span><span class="v">${g.name||t.geoid}</span></div>
-    <div class="kv"><span class="k">State / County FIPS</span><span class="v">${g.state_fips} / ${g.county_fips}</span></div>
-    <div class="kv"><span class="k">Land area</span><span class="v">${fmt(g.aland/2589988,2)} sq mi</span></div></div>`;
+  if(s) h+=whyCard(s);
+
+  if(g) h+=`<div class="card"><h3>Location</h3>
+    <div class="kv"><span class="k">County</span><span class="v">${g.county_name||'—'}</span></div>
+    <div class="kv"><span class="k">State</span><span class="v">${STATE_AB[g.state_fips]||g.state_fips}</span></div>
+    <div class="kv"><span class="k">Land area</span><span class="v">${fmt(g.aland/2589988,2)} sq mi</span></div>
+    <div class="kv"><span class="k">Census identifier</span><span class="v muted" style="font-weight:400">${t.geoid}</span></div></div>`;
 
   if(a){
     h+=`<div class="card"><h3>Demographics · ACS ${a.vintage}</h3>
@@ -220,7 +1080,13 @@ function render(d, matched){
       <span class="k">Status</span><span class="v">${t.opportunity_zone.in_oz?'✅ Designated':'Not designated'}</span></div></div>`;
   }
 
-  document.getElementById('out').innerHTML=h;
+  const out=document.getElementById('out');
+  out.innerHTML=h;
+  // The detail panel updates correctly even when this isn't called -- the
+  // actual bug report ("nothing happens on click") was that #out sits below
+  // a tall filters/results stack and updating it off-screen is
+  // indistinguishable from not responding at all.
+  out.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 function showTract(geoid){
@@ -238,7 +1104,7 @@ function lookup(){
       if(!ok){document.getElementById('out').innerHTML=`<div class="card err">${j.error||'lookup failed'}</div>`;return;}
       render(j, j.matched_address);
       if(marker) map.removeLayer(marker);
-      marker=L.circleMarker([j.lat,j.lon],{radius:7,color:'#4ea1ff',fillColor:'#4ea1ff',fillOpacity:.9}).addTo(map);
+      marker=L.circleMarker([j.lat,j.lon],{radius:7,color:'#3987e5',fillColor:'#3987e5',fillOpacity:.9}).addTo(map);
       map.setView([j.lat,j.lon], 12);
     })
     .catch(e=>{document.getElementById('out').innerHTML=`<div class="card err">${e}</div>`;})
