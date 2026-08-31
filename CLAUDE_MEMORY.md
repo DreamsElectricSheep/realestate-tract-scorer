@@ -10,6 +10,70 @@ note instead (Hub `state/realestate/handoff.md`) — this file is the full histo
 
 ## Session History
 
+### 2026-08-31 (later) — Closed the Connecticut boundary crosswalk gap
+
+Picked up the top open item from the 2026-08-23 discovery: 884 CT tracts
+(every CT tract) had zero 2010→2020 crosswalk coverage, so CT trends
+couldn't get a multi-year rent/income signal — the home-market state, since
+Hamden CT is the distance-filter base.
+
+**Root cause had two layers, both fixed.**
+
+1. **Geometry**: CT replaced 8 counties with 9 Planning Regions in 2022,
+   changing every tract GEOID's county-code digits (001–015 → 110–190)
+   independent of the national 2010→2020 boundary redesign. The official
+   Census crosswalk predates the change and can't bridge it. Fix: new
+   `scripts/ingest_ct_relabel.py` — downloads TIGER 2021 (old-coded)
+   geometry via the existing `ingest_tiger.py --state 09 --tiger-year 2021
+   --vintage 2021`, computes an area-weighted intersection crosswalk against
+   current `tract_geom`, upserts directly into the existing
+   `tract_xwalk_2010_2020` table (zero downstream schema change). Achieved
+   883/883 (100%) coverage of old CT tracts — rejected an earlier
+   suffix-matching shortcut that only got 86.8%. Spot-checked: 881 clean 1:1
+   matches at weight≈1.0, 4 partial-split rows summing to exactly 1.0000
+   (genuine water-tract splits).
+
+2. **A second, non-obvious gap the crosswalk alone didn't close**: CT's ACS
+   vintages 2020 and 2021 are *also* old-coded — its coding-scheme cutover
+   is vintage 2022, not the national vintage-2020 boundary cutover. The
+   crosswalk fix alone still left those two years missing (series showed
+   `[2017,2018,2019,2022,2023]`, silently skipping 2020-2021). Two things
+   were gating on the wrong constant:
+   - `scripts/acs_boundaries.py::unify_acs_boundaries` used a single
+     hardcoded `FIRST_2020_BOUNDARY_VINTAGE = 2020` cutoff for the whole
+     country. Replaced with `STATE_CODING_CUTOVER_VINTAGE = {"09": 2022}`,
+     a per-state override — **not** a geoid-membership check (tried that
+     first, reverted it): ~22,000 real 2010→2020 split parents nationally
+     reuse their exact parent GEOID for one child at ~99%+ area weight, so
+     checking "does this geoid already name a current tract" would
+     misclassify their pre-2020 rows as native and skip crosswalking them.
+     The per-state-vintage rule avoids that collision entirely.
+   - `web/app.py::load_acs_series_unified` had its *own* hardcoded
+     `vintage >= 2020` / `vintage < 2020` SQL split ahead of calling
+     `unify_acs_boundaries` — so even after the module-level fix, this
+     caller was still pre-filtering CT's 2020-2021 rows out before they
+     ever reached the reconciliation logic. Fixed to fetch candidates in
+     one un-filtered `OR`-based query (a single query, not two concatenated
+     ones, to avoid double-fetching the ~22,000 geoids that are their own
+     historical contributor) and let `unify_acs_boundaries` decide nativity.
+
+**Verified end-to-end**: tract 09150815000 (the original bug-report tract)
+went from `vintages: [2022, 2023]` → `[2017, 2018, 2019, 2020, 2021, 2022,
+2023]`, full 7-year span. Spot-checked 5 random CT tracts: 3 got the full
+7-year span, 2 correctly show only 2020-2023 — confirmed those two have no
+ACS data at all pre-2020 under their old-coded geoid (genuinely new tracts
+introduced by the 2020 redesign, not a bug). Rescored all 84,415 tracts
+nationally (`score_tracts.py`) to propagate the fix into live scores/trends.
+Test suite grown 33 → 38 checks (added CT-cutover and non-CT-state cases);
+all pass. Committed and pushed
+(`github.com/DreamsElectricSheep/realestate-tract-scorer`).
+
+**Still open**: score remains statistically unvalidated (−0.48pp decile
+spread, see 2026-08-23 entry); `zillow_series` unused by the scorer; empty
+tables `irs_migration`, `qcew_county`, `opportunity_zones`, `reg_flags`,
+`crime_agency`; Flask dev server in production (low priority, LAN-only).
+
+
 ### 2026-08-31 — Found and fixed a real ~24-hour outage; project status check
 
 User asked "what's left for this project," which is normally a status
