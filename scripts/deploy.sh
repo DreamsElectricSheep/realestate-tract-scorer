@@ -15,6 +15,7 @@ ssh -i "$KEY" -o BatchMode=yes "$HOST" "if not exist C:\\DeepRock\\realestate mk
 scp -q -i "$KEY" -o BatchMode=yes -r "$SRC/scripts" "$HOST:$STAGE/"
 scp -q -i "$KEY" -o BatchMode=yes -r "$SRC/sql"     "$HOST:$STAGE/"
 scp -q -i "$KEY" -o BatchMode=yes -r "$SRC/web"     "$HOST:$STAGE/"
+scp -q -i "$KEY" -o BatchMode=yes -r "$SRC/tests"   "$HOST:$STAGE/"
 echo "staged to $STAGE"
 
 echo "=== installing to /opt/realestate ==="

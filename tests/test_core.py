@@ -133,7 +133,7 @@ def test_scan_math_against_reference():
     import urllib.request
 
     print("\n/api/scan vs reference underwriting")
-    url = ("http://127.0.0.1:5008/api/scan?down_payment=60000&max_loan=240000"
+    url = ("http://127.0.0.1:5011/api/scan?down_payment=60000&max_loan=240000"
            "&limit=5&rate=7&term=30&vacancy=7&opex=40&insurance=1500")
     try:
         with urllib.request.urlopen(url, timeout=30) as r:

@@ -4,7 +4,7 @@ Scores all ~84,000 U.S. census tracts for multifamily investment potential, and
 underwrites individual deals against that backdrop. Runs entirely on free public
 data — no paid API is required for anything currently built.
 
-**Dashboard:** http://192.168.1.252:5008 (LAN only)
+**Dashboard:** http://192.168.1.252:5011 (LAN only)
 
 ---
 

@@ -33,10 +33,10 @@ systemctl is-active realestate-dashboard.service
 systemctl is-enabled realestate-dashboard.service
 
 echo "=== LOCAL HTTP ==="
-curl -s -o /dev/null -w "GET /        -> %{http_code}\n" http://localhost:5008/
-curl -s -o /dev/null -w "GET /health  -> %{http_code}\n" http://localhost:5008/api/health
+curl -s -o /dev/null -w "GET /        -> %{http_code}\n" http://localhost:5011/
+curl -s -o /dev/null -w "GET /health  -> %{http_code}\n" http://localhost:5011/api/health
 echo "--- health payload ---"
-curl -s http://localhost:5008/api/health | head -c 700; echo
+curl -s http://localhost:5011/api/health | head -c 700; echo
 
 echo "=== WSL IP (for portproxy) ==="
 hostname -I | awk '{print $1}'

@@ -10,6 +10,8 @@ cp -f "$SRC/sql"/*.sql    "$DST/sql/"
 mkdir -p "$DST/web/templates"
 cp -f "$SRC/web"/*.py "$DST/web/" 2>/dev/null || true
 cp -f "$SRC/web/templates"/*.html "$DST/web/templates/" 2>/dev/null || true
+mkdir -p "$DST/tests"
+cp -f "$SRC/tests"/*.py "$DST/tests/" 2>/dev/null || true
 chmod +x "$DST/scripts"/*.py
 
 echo "=== scripts ==="

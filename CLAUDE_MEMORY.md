@@ -10,6 +10,53 @@ note instead (Hub `state/realestate/handoff.md`) — this file is the full histo
 
 ## Session History
 
+### 2026-08-31 — Found and fixed a real ~24-hour outage; project status check
+
+User asked "what's left for this project," which is normally a status
+question. Checking live state before answering found the dashboard actually
+down: `curl` to :5008 timed out completely (connection refused at the
+network level, not an HTTP error).
+
+**Root cause: a WSL2 networking fault after a host reboot, not application
+code.** `systemctl status` showed `realestate-dashboard.service` crash-looping
+(17,000+ restarts, ~24h) on `OSError: [Errno 98] Address already in use` for
+port 5008. But nothing was actually holding it: `/proc/net/tcp` inside WSL
+showed zero entries for port 5008 (hex 1388), `ss`/`netstat` agreed, and
+checking the WINDOWS side directly (`netstat -ano`, `netsh interface
+portproxy show all`) found no listener and no stale port-forward rule either.
+Conclusion: a phantom kernel-level port reservation inside the WSL2 utility
+VM, most likely from an abrupt host sleep/reboot that didn't cleanly tear down
+the previous process's socket. The standard fix is `wsl --shutdown` from
+Windows, which resets the whole VM's network stack -- **not done**, because
+that VM also runs the live trading fleet (freedom_bot.py, pumpfun_recon.py,
+telegram_nwbo_scanner.py, other gunicorn dashboards on :8000 etc.) and would
+have killed all of it. This is a hard boundary, not a judgment call: never
+run `wsl --shutdown` on this host without the owner doing it themselves, or
+explicit confirmation naming the trading-fleet impact.
+
+**Fix applied instead: moved the dashboard off the cursed port.**
+5008 -> **5011** (verified free in `/proc/net/tcp` and via `ss` before
+committing to it, on both the WSL and Windows side). Updated every reference:
+`web/app.py` (docstring + `app.run`), `README.md`, `scripts/install_service.sh`,
+`tests/test_core.py`. Service now binds cleanly and immediately -- confirmed
+`curl http://192.168.1.252:5011/api/health` responds. **New URL:
+http://192.168.1.252:5011** -- the old bookmark (`:5008`) will not work again
+without a `wsl --shutdown` the owner runs deliberately.
+
+**Second real bug found while fixing the first: `deploy.sh` never staged
+`tests/`.** Editing `tests/test_core.py` locally and running `deploy.sh`
+silently left the OLD file (still referencing :5008) on the Beelink --
+`runtests.sh` was therefore testing stale code and failed with a connection
+error that had nothing to do with the actual fix. Fixed `deploy.sh` and
+`_install_remote.sh` to stage/install `tests/` alongside `scripts/`, `sql/`,
+`web/`. Re-ran after the fix: all 33 checks pass for real this time.
+
+Everything else from the 2026-08-23 audit remains in the state that session
+left it -- see that entry for the still-open items (Connecticut crosswalk
+gap, unvalidated score, unused zillow_series, etc.). This entry is purely the
+outage-and-port-move.
+
+
 ### 2026-08-23 (later) — Plain-English rewrite + a CT geography discovery
 
 **Rewrote the jargon out of the deal scanner, deal calculator, and trend

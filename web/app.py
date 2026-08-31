@@ -2,7 +2,7 @@
 """
 Real Estate Scorer dashboard.
 
-  http://192.168.1.252:5008
+  http://192.168.1.252:5011
 
 Four things it does:
   1. Address lookup  — paste an address, get everything we know about its tract.
@@ -652,7 +652,12 @@ def deal_scan():
 
 
 if __name__ == "__main__":
-    # 5005/5006/5007 already owned by the trading dashboard, crypto validator,
-    # and the biotech fda_dashboard.py respectively — confirmed live on the
-    # Beelink before picking this port.
-    app.run(host="0.0.0.0", port=5008, debug=False)
+    # 5005/5006/5007/5008 already owned by the trading dashboard, crypto
+    # validator, biotech fda_dashboard.py, and (until 2026-08-31) this app's own
+    # old port -- moved off 5008 after a WSL2 networking fault left it in a
+    # perpetual EADDRINUSE state after a host reboot (nothing in this WSL
+    # instance's /proc/net/tcp held it, no Windows-side listener or portproxy
+    # rule either -- a phantom kernel-level reservation, only clearable with a
+    # full `wsl --shutdown`, which was not done here since it would also kill
+    # the trading fleet sharing this VM). See CLAUDE_MEMORY.md.
+    app.run(host="0.0.0.0", port=5011, debug=False)
