@@ -107,6 +107,39 @@ def test_unify_boundaries():
     check("no rows remain under the retired 2010 geoid",
           int((out.geoid == "OLD").sum()), 0)
 
+    print("\nunify_acs_boundaries (CT-style: a mid-run coding cutover, not vintage-2020)")
+    # A Connecticut geoid (state prefix "09") is old-coded across 2020-2021,
+    # switching to its new county code only in 2022 -- a cutover that lands
+    # two years after the national vintage-2020 default.
+    fake_xwalk2 = pd.DataFrame([
+        {"geoid_2010": "09150815000_OLD", "geoid_2020": "09150815000", "area_weight": 1.0},
+    ])
+    acs_boundaries.pd.read_sql = lambda *a, **k: fake_xwalk2  # type: ignore[assignment]
+    raw2 = pd.DataFrame([
+        {"geoid": "09150815000_OLD", "vintage": 2020, "rent": 800.0},
+        {"geoid": "09150815000_OLD", "vintage": 2021, "rent": 850.0},
+        {"geoid": "09150815000", "vintage": 2022, "rent": 900.0},
+    ])
+    out2 = acs_boundaries.unify_acs_boundaries(raw2, ["rent"])
+    got2 = out2[out2.geoid == "09150815000"].sort_values("vintage")
+    check("a vintage-2020 row still gets crosswalked when CT's cutover is 2022",
+          len(got2), 3)
+    check("  ...2020 carries the old-coded value", float(got2.iloc[0]["rent"]), 800.0)
+    check("  ...2021 carries the old-coded value", float(got2.iloc[1]["rent"]), 850.0)
+    check("  ...2022 native value untouched", float(got2.iloc[2]["rent"]), 900.0)
+
+    print("\nunify_acs_boundaries (non-CT state is unaffected by the CT override)")
+    fake_xwalk3 = pd.DataFrame([
+        {"geoid_2010": "01001020100_OLD", "geoid_2020": "01001020100", "area_weight": 1.0},
+    ])
+    acs_boundaries.pd.read_sql = lambda *a, **k: fake_xwalk3  # type: ignore[assignment]
+    raw3 = pd.DataFrame([
+        {"geoid": "01001020100", "vintage": 2020, "rent": 700.0},
+    ])
+    out3 = acs_boundaries.unify_acs_boundaries(raw3, ["rent"])
+    check("Alabama's vintage-2020 row is native, not crosswalked",
+          float(out3.iloc[0]["rent"]), 700.0)
+
 
 # ───────────────────────────────────────────── deal math
 def reference_deal(price, rent, units, vacancy_pct, opex_pct, tax, insurance,

@@ -53,25 +53,25 @@ def load_acs_series_unified(geoid: str) -> list[dict]:
     vintages happen to share its exact geoid -- for a newly-split tract,
     sometimes just one or two years, silently mislabeled as "the trend."
     """
+    # One query, not native-vintage/contributor-vintage split at the SQL
+    # level: which vintages count as "native" varies by state (Connecticut's
+    # coding cutover lands two years after the national one -- see
+    # acs_boundaries.STATE_CODING_CUTOVER_VINTAGE), so that decision is left
+    # entirely to unify_acs_boundaries. A row matching both clauses (true for
+    # ~22,000 split parents that reuse their own geoid as one child) would
+    # otherwise be double-fetched by two separate queries; OR avoids that.
     cols_sql = ", ".join(ACS_TREND_VALUE_COLS)
-    native = pd.read_sql(
+    candidates = pd.read_sql(
         f"SELECT geoid, vintage, {cols_sql} FROM acs_tract "
-        f"WHERE geoid = %(g)s AND vintage >= 2020",
-        engine(), params={"g": geoid},
-    )
-    contributors = pd.read_sql(
-        f"SELECT geoid, vintage, {cols_sql} FROM acs_tract "
-        f"WHERE vintage < 2020 AND geoid IN "
+        f"WHERE geoid = %(g)s OR geoid IN "
         f"(SELECT geoid_2010 FROM tract_xwalk_2010_2020 WHERE geoid_2020 = %(g)s)",
         engine(), params={"g": geoid},
     )
-    if contributors.empty:
-        combined = native
+    if candidates.empty:
+        combined = candidates
     else:
-        crosswalked = unify_acs_boundaries(
-            pd.concat([native, contributors], ignore_index=True), ACS_TREND_VALUE_COLS
-        )
-        combined = crosswalked[crosswalked["geoid"] == geoid] if not crosswalked.empty else native
+        unified = unify_acs_boundaries(candidates, ACS_TREND_VALUE_COLS)
+        combined = unified[unified["geoid"] == geoid] if not unified.empty else candidates
 
     if combined.empty:
         return []

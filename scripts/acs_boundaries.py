@@ -40,10 +40,33 @@ from db import engine
 
 log = logging.getLogger("acs_boundaries")
 
-# First ACS vintage published on 2020 tract boundaries. Vintages below this
-# are on 2010 boundaries and must be crosswalked before being compared to
-# anything at or above it.
+# First ACS vintage published on 2020 tract boundaries, for the country as a
+# whole. Vintages below this are on 2010 boundaries and must be crosswalked
+# before being compared to anything at or above it.
 FIRST_2020_BOUNDARY_VINTAGE = 2020
+
+# States whose ACS geoid *coding scheme* changed on a different vintage than
+# the national boundary redesign. Connecticut replaced 8 counties with 9
+# Planning Regions as county-equivalents in 2022 -- a separate, pure-GEOID
+# relabeling (only the county-code digits change; the underlying tract
+# polygons mostly don't), independent of and two years later than the
+# national 2010->2020 redesign. Its ACS vintages 2020 and 2021 are on 2020
+# tract boundaries but are still keyed with the OLD county codes, so they
+# need crosswalking despite being >= FIRST_2020_BOUNDARY_VINTAGE. The old
+# codes were bridged into tract_xwalk_2010_2020 by scripts/ingest_ct_relabel.py.
+#
+# NOT safe to detect this generically by checking whether a row's geoid
+# already names a current tract: ~22,000 genuine 2010->2020 split parents
+# reuse their exact parent GEOID for one child at ~99%+ area weight, so a
+# geoid-membership check would wrongly treat their pre-2020 rows as already
+# native and skip crosswalking them.
+STATE_CODING_CUTOVER_VINTAGE = {
+    "09": 2022,  # Connecticut
+}
+
+
+def _cutover_vintage(geoid: pd.Series) -> pd.Series:
+    return geoid.str[:2].map(STATE_CODING_CUTOVER_VINTAGE).fillna(FIRST_2020_BOUNDARY_VINTAGE)
 
 
 def crosswalk_2010_to_2020(df: pd.DataFrame, value_cols: list[str]) -> pd.DataFrame:
@@ -96,14 +119,18 @@ def unify_acs_boundaries(df: pd.DataFrame, value_cols: list[str]) -> pd.DataFram
     Take a raw multi-vintage acs_tract frame and return it entirely on 2020
     boundaries, so a trend computed across vintages compares like with like.
 
-    Vintages >= FIRST_2020_BOUNDARY_VINTAGE pass through untouched. Earlier
-    vintages are crosswalked per-vintage and re-stamped with the 2020 GEOID.
+    A row is native if its vintage is at or past its state's coding-cutover
+    vintage (FIRST_2020_BOUNDARY_VINTAGE nationally, overridden per
+    STATE_CODING_CUTOVER_VINTAGE for states like Connecticut whose cutover
+    landed later). Earlier vintages are crosswalked per-vintage and
+    re-stamped with the 2020 GEOID.
     """
     if df.empty:
         return df
 
-    old = df[df["vintage"] < FIRST_2020_BOUNDARY_VINTAGE]
-    new = df[df["vintage"] >= FIRST_2020_BOUNDARY_VINTAGE]
+    is_native = df["vintage"] >= _cutover_vintage(df["geoid"])
+    new = df[is_native]
+    old = df[~is_native]
 
     if old.empty:
         return new.reset_index(drop=True)
